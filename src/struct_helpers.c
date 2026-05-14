@@ -1,19 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include "struct_helpers.h"
 
 // Queue
-typedef struct q_node {
-    void *data;
-    size_t data_size;
-    struct q_node *next;
-} q_node;
-
-typedef struct Queue {
-    q_node *front;
-    q_node *rear;
-    int size;
-} Queue;
-
 Queue *init_queue() {
     Queue *q = (Queue *)malloc(sizeof(Queue));
     if (q == NULL) {
@@ -121,18 +110,6 @@ void destroy_queue(Queue *q) {
 }
 
 // Linked List
-typedef struct list_node {
-    void *data;
-    size_t data_size;
-    struct list_node *next;
-} list_node;
-
-typedef struct LinkedList {
-    list_node *head;
-    int size;
-} LinkedList;
-
-/* Create list */
 LinkedList *init_list() {
     LinkedList *list = (LinkedList *)malloc(sizeof(LinkedList));
     if (list == NULL) {
