@@ -84,7 +84,6 @@ int dequeue(Queue *q, void *out_buffer, size_t buffer_size) {
     return 1;
 }
 
-/* Peek front element without removing */
 void *peek(Queue *q) {
     if (isEmpty(q)) {
         return NULL;
@@ -93,12 +92,10 @@ void *peek(Queue *q) {
     return q->front->data;
 }
 
-/* Get queue size */
 int queueSize(Queue *q) {
     return q->size;
 }
 
-/* Destroy queue */
 void destroyQueue(Queue *q) {
     while (!isEmpty(q)) {
         QueueNode *temp = q->front;
