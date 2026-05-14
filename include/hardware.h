@@ -167,6 +167,17 @@ struct pte {
 
 typedef struct pte pte_t;
 
+/* 
+ * Defining a struct for PCB here
+ */
+typedef struct PCB {
+	int pid;
+	int ppid; 
+	UserContext* usr_cont;
+	KernelContext* krnl_cont
+	pte pagetable_arr[];
+	char* name;
+}
 
 /*
  * Define the protection bits used in page table entries.
