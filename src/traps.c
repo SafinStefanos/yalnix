@@ -19,9 +19,9 @@ void handler(UserContent usr_cont) {
 		Put return value in regs in UserContext
 	else if(usr_cont==TRAP_CLOCK)
 		Global tick counter ++
-	Check for procs waiting on delay and wake them if enough time has passed
-	Implement round robin scheduling
-	else if(usr_cont==TRAP_ILLEGAL)
+		Check for procs waiting on delay and wake them if enough time has passed
+		Implement round robin scheduling
+		else if(usr_cont==TRAP_ILLEGAL)
 		Print illegal instruction error and exit
 	else if(usr_cont==TRAP_MEMORY)
 		Check if faulty addr is in region 1 and sits between current brk and bottom of user stack
