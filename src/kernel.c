@@ -8,7 +8,7 @@
 SetKernelBrk
 	Check if virtual memory is enabled
 	Compute page indices
-  If more pages needed, check if enough physical frames are free then allocate, else undo partially allocated pages and error
+ 	If more pages needed, check if enough physical frames are free then allocate, else undo partially allocated pages and error
 
 	
 KernelStart
@@ -16,15 +16,15 @@ KernelStart
 	Build region 0 page table
 	Create void* array for Interrupt Vector table where each entry points to a handler
 	Write table address to REG_VECTOR_BASE register
-  Init first proc, create PCB, alloc kernel stack, alloc region 1 page table with one page for user stack
-  Compute kernel mem boundaries
-  Map kernel heap, data, text pages
-  Init region 0 page table
-  Write regions into REG_PTRs
-  set REG_VM_ENABLE to 1
-  Create init process PCB
-  Load init program
-  Flush tlb
+  	Init first proc, create PCB, alloc kernel stack, alloc region 1 page table with one page for user stack
+  	Compute kernel mem boundaries
+  	Map kernel heap, data, text pages
+  	Init region 0 page table
+  	Write regions into REG_PTRs
+  	set REG_VM_ENABLE to 1
+  	Create init process PCB
+  	Load init program
+  	Flush tlb
 
 LoadProgram
 	Open exec file
