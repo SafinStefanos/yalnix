@@ -9,7 +9,7 @@
 
 
 // Plan is to move all of these to their own functions when actually implementing
-void handler(UserContent usr_cont) {
+void thandler(UserContent usr_cont) {
 /*
 
 	if(usr_cont==TRAP_KERNEL)
