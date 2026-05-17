@@ -3,6 +3,10 @@
 #include <load_info.h>
 #include <yalnix.h>
 
+unsigned int frames[MAX_PMEM_SIZE / PAGESIZE];
+pte_t KernelPT[MAX_PT_LEN];
+
+
 /*
 
 SetKernelBrk
@@ -55,7 +59,7 @@ KCSwitch
 */
 
 extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
-	int frmtot = pmem_size/PAGESIZE;
+	
 
 	memset();
 }
