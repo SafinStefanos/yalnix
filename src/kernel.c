@@ -91,4 +91,9 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
     	KernelPT[i].prot = PROT_READ | PROT_WRITE;
 	}
 	
+	for (i = 0; i < TRAP_VECTOR_SIZE; i++) {
+    	IVT[i] = &thandler; 
+	}
+
+	WriteRegister(REG_VECTOR_BASE, (unsigned int)IVT);
 }
