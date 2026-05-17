@@ -5,7 +5,7 @@
 #include "procs.h"
 
 
-unsigned int frames[MAX_PMEM_SIZE / PAGESIZE];
+unsigned char frame_tracker[(MAX_PMEM_SIZE / PAGESIZE) / 8];
 pte_t KernelPT[MAX_PT_LEN];
 void (*IVT[TRAP_VECTOR_SIZE])(UserContext *));
 
@@ -62,7 +62,19 @@ KCSwitch
 */
 
 extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
-	
+	TracePrintf(DEBUG, "KernelStart\n");
 
-	memset();
+	int num_frames = pmem_size / PAGESIZE; /*how many r actually possible?*/
+	int i;
+	for (i = 0; i < (MAX_PMEM_SIZE / PAGESIZE); i++) { /*make free*/
+    	frames[i] = 0;
+	}
+	for (i = 0; i < _orig_kernel_brk_page; i++) {
+    frames[i] = 1;
+	}
+
+	frames[KERNEL_STACK_BASE >> PAGESHIFT] = 1; /*bc kernel stack is 2 pages*/
+	frames[(KERNEL_STACK_BASE >> PAGESHIFT) + 1] = 1;
+	
+	
 }
