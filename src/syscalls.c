@@ -7,33 +7,57 @@
 
 /*
 
-TRAP_KERNEL
-	Long conditional statement to figure out which syscall happened
-	Make sure syscall is valid and possible
-	Do intended kernel function
-	Put return value in regs in UserContext
-TRAP_CLOCK
-	Global tick counter ++
-  	Check for procs waiting on delay and wake them if enough time has passed
-  	Implement round robin scheduling
-TRAP_ILLEGAL
-	Print illegal instruction error and exit
-TRAP_MEMORY
-  	Check if faulty addr is in region 1 and sits between current brk and bottom of user stack
-  	If valid growth, allocate new frame and update region 1 page table, then return and retry instruction
-  	Else abort
-TRAP_MATH
-	Print illegal math operation and exit
-TRAP_TTY_RECEIVE
-	Find interrupt terminal ID
-	Save curr proc
-	Find pending read req
-	Read input into request buffer
-	Context switch to waiting proc if there is one
-	Restore original proc
-TRAP_TTY_TRANSMIT
-  	Find interrupt terminal ID
-  	Find completed write request
-  	Wake blocked writer proc
+Fork
+	Create child pcb and page table
+	Copy parent pcb state into child
+	Alloc temp kernel page
+	For each valid parent region 1 page
+		Alloc child frame
+		Copy parent page to temp page
+		Switch to child page table
+		Copy temp page to child page
+		Restore parent table
+	Free temp page
+	Alloc child kernel stack pages
+	Create child kernel context
+	If running as child return 0
+	Else put child in ready queue and return PID to parent
+
+Exec
+	Get curr PCB and metadata
+	Open and validate exec file
+	LoadProgram(file, args, currPCB)
+
+Exit
+	Get curr proc
+	If proc = init halt
+	Find parent proc
+	If parent exists
+	store child exit status in parent queue
+		If parent waiting wake
+	Schedule another proc
+	
+Wait
+	Check if proc has children
+	If no child return error
+	While no exited children block curr proc and schedule others
+	Retrieve exit status
+	Return child PID
+
+GetPid
+	Return current PID
+
+Brk
+	Validate addr is in region 1
+	Get current proc and current brk
+	If addr > current brk and enough mem is available
+		Alloc additional heap pages
+	Else free heap pages
+	Update proc brk
+Delay
+	If ticks == 0 return 0
+	Set proc sleep timer
+	Move proc to sleep queue
+	Schedule another proc
 
 */
