@@ -53,3 +53,7 @@ KCSwitch
 	Reset scheduling tick count
 
 */
+
+extern void KernelStart (char **argv, unsigned int mem, UserContext *ctx){
+	
+}
