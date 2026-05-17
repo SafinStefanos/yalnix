@@ -2,6 +2,8 @@
 #include <traps.h>
 #include <load_info.h>
 #include <yalnix.h>
+#include "procs.h"
+
 
 unsigned int frames[MAX_PMEM_SIZE / PAGESIZE];
 pte_t KernelPT[MAX_PT_LEN];
