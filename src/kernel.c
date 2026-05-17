@@ -66,15 +66,29 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 
 	int num_frames = pmem_size / PAGESIZE; /*how many r actually possible?*/
 	int i;
-	for (i = 0; i < (MAX_PMEM_SIZE / PAGESIZE); i++) { /*make free*/
+	for(i = 0; i < (MAX_PMEM_SIZE / PAGESIZE); i++){ /*make free*/
     	frames[i] = 0;
 	}
-	for (i = 0; i < _orig_kernel_brk_page; i++) {
-    frames[i] = 1;
+	for(i = 0; i < _orig_kernel_brk_page; i++){
+    	frames[i] = 1;
 	}
 
 	frames[KERNEL_STACK_BASE >> PAGESHIFT] = 1; /*bc kernel stack is 2 pages*/
 	frames[(KERNEL_STACK_BASE >> PAGESHIFT) + 1] = 1;
 	
+	for (i = 0; i < MAX_PT_LEN; i++){
+    	KernelPT[i].valid = 0; /*Not used yet*/
+	}
+
+	for(i=_first_kernel_text_page; i < _first_kernel_data_page; i++){
+    	KernelPT[i].valid = 1;
+   		KernelPT[i].pfn = i; /*VPN i -> PFN i*/
+    	KernelPT[i].prot = PROT_READ | PROT_EXEC;
+	}
+	for (i = _first_kernel_data_page; i < _orig_kernel_brk_page; i++) {
+    	KernelPT[i].valid = 1;
+    	KernelPT[i].pfn = i; /*map*/
+    	KernelPT[i].prot = PROT_READ | PROT_WRITE;
+	}
 	
 }
