@@ -54,6 +54,8 @@ KCSwitch
 
 */
 
-extern void KernelStart (char **argv, unsigned int mem, UserContext *ctx){
-	
+extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
+	int frmtot = pmem_size/PAGESIZE;
+
+	memset();
 }
