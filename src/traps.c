@@ -42,4 +42,19 @@ void handler(UserContent usr_cont) {
 		Wake blocked writer proc
 	
 */
+	if(usr_cont==TRAP_KERNEL){
+
+	}else if(usr_cont==TRAP_CLOCK){
+
+	}else if(usr_cont==TRAP_MEMORY){
+
+	}else if(usr_cont==TRAP_MATH){
+
+	}else if(usr_cont==TRAP_TTY_RECEIVE){
+		
+	}else if(usr_cont==TRAP_TTY_TRANSMIT){
+
+	}
+
+	
 }
