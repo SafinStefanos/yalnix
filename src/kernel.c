@@ -5,11 +5,13 @@
 #include "procs.h"
 
 
-unsigned char frames[(MAX_PMEM_SIZE/PAGESIZE)/8];
+unsigned char frames[MAX_PMEM_SIZE/PAGESIZE];
 pte_t KernelPT[MAX_PT_LEN];
-void (*IVT[TRAP_VECTOR_SIZE])(UserContext *);
+void *IVT[TRAP_VECTOR_SIZE]
 pte_t r1pt[MAX_PT_LEN];
-pcb_t *ipcb;
+PCB_t *ipcb = NULL;
+PCB_t *current_process = NULL;
+PCB_t *ready_queue_head = NULL;
 
 /*
 
