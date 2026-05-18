@@ -16,7 +16,7 @@ typedef struct Queue {
 } Queue;
 
 Queue *init_queue();
-queue_node *create_queue_node(void *data, size_t data_size);
+q_node *create_q_node(void *data, size_t data_size);
 int isEmpty(Queue *q);
 int enqueue(Queue *q, void *data, size_t data_size);
 int dequeue(Queue *q, void *out_buffer, size_t buffer_size);
@@ -45,3 +45,4 @@ list_node *getNode(LinkedList *list, int index);
 void destroy_list(LinkedList *list);
 
 #endif
+
