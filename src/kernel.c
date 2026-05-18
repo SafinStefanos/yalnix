@@ -3,6 +3,7 @@
 #include <load_info.h>
 #include <yalnix.h>
 #include <struct_helpers.h>
+#include <ykernel.h>
 
 
 unsigned char frames[MAX_PMEM_SIZE/PAGESIZE];
