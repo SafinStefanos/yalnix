@@ -15,8 +15,8 @@ Queue *init_queue() {
     return q;
 }
 
-queue_node *create_queue_node(void *data, size_t data_size) {
-    queue_node *node = malloc(sizeof(queue_node));
+q_node *create_q_node(void *data, size_t data_size) {
+    q_node *node = malloc(sizeof(queue_node));
     if (node == NULL) {
         return NULL;
     }
