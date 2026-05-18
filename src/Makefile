@@ -1,29 +1,25 @@
-ALL = $(os)
-os = yalnix
+ALL = yalnix
 
-# Directories
 LIBDIR = ../lib
 INCDIR = ../include
 
-# Compiler flags
-CFLAGS = -I$(INCDIR)
-LDFLAGS = -L$(LIBDIR)
+CC = gcc
 
-# Libraries
-LIBS = -lkernel -lyuser -lhardware
+CFLAGS = -m32 -I$(INCDIR)
+LDFLAGS = -m32 -L$(LIBDIR)
 
-# Source and object files
-kernel_files = kernel.c struct_helpers.c syscalls.c traps.c
-kernel_objs = kernel.o struct_helpers.o syscalls.o traps.o
+LIBS = -lkernel -lhardware -lelf
 
-# Build rules
+SRC = kernel.c syscalls.c traps.c
+OBJ = kernel.o syscalls.o traps.o
+
 all: $(ALL)
 
-$(os): $(kernel_objs)
-	gcc $(LDFLAGS) -o $@ $^ $(LIBS)
+yalnix: $(OBJ)
+	$(CC) $(LDFLAGS) -o $@ $(OBJ) $(LIBS)
 
 %.o: %.c
-	gcc $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(kernel_objs) $(os)
+	rm -f $(OBJ) yalnix

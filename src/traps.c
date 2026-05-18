@@ -7,6 +7,13 @@
 #define	TRAP_TTY_TRANSMIT	6
 #define	TRAP_DISK		7
 
+#include <hardware.h>
+#include <traps.h>
+#include <load_info.h>
+#include <yalnix.h>
+#include <ykernel.h>
+#include <struct_helpers.h>
+
 
 // Plan is to move all of these to their own functions when actually implementing
 void thandler(UserContext usr_cont) {
@@ -42,19 +49,6 @@ void thandler(UserContext usr_cont) {
 		Wake blocked writer proc
 	
 */
-	if(usr_cont==TRAP_KERNEL){
-
-	}else if(usr_cont==TRAP_CLOCK){
-
-	}else if(usr_cont==TRAP_MEMORY){
-
-	}else if(usr_cont==TRAP_MATH){
-
-	}else if(usr_cont==TRAP_TTY_RECEIVE){
-		
-	}else if(usr_cont==TRAP_TTY_TRANSMIT){
-
-	}
-
 	
 }
+
