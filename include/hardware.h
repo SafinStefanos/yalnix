@@ -170,14 +170,23 @@ typedef struct pte pte_t;
 /* 
  * Defining a struct for PCB here
  */
-typedef struct PCB {
-	int pid;
-	int ppid; 
-	UserContext* usr_cont;
-	KernelContext* krnl_cont
-	pte pagetable_arr[];
-	char* name;
-}
+#define S_RUNNING 0
+#define S_READY   1
+#define S_BLOCKED 2
+
+typedef struct PCB{
+  UserContext usr_ctx;
+  KernelContext krn_ctx;
+  pte_t *r1pt;
+  int pid;
+  int ppid;
+  int state;
+  int exstat;
+  int kstack_pfn[4];
+  struct PCB *child_pcb->parent = current_process;
+  struct PCB *child_pcb->next_sibling = current_process->children;
+  struct PCB *current_process->children = child_pcb;
+} PCB_t;
 
 /*
  * Define the protection bits used in page table entries.
