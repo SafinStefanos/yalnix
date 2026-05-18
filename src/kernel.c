@@ -2,8 +2,10 @@
 #include <traps.h>
 #include <load_info.h>
 #include <yalnix.h>
-#include <struct_helpers.h>
 #include <ykernel.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <struct_helpers.h>
 
 
 unsigned char frames[MAX_PMEM_SIZE/PAGESIZE];
@@ -68,6 +70,129 @@ KCSwitch
 	Reset scheduling tick count
 
 */
+int find_free() {
+	for (int j = 0; j < MAX_PMEM_SIZE/PAGESIZE; j++) {
+		if (frames[j] == 0) return j;
+	}
+}
+
+
+
+static void free_region1(pte_t *pt) {
+    for (int i = 0; i < MAX_PT_LEN; i++) {
+        if (pt[i].valid && i >= (VMEM_1_BASE >> PAGESHIFT)) {
+            frames[pt[i].pfn] = 0;
+            pt[i].valid = 0;
+        }
+    }
+}
+
+
+int LoadProgram(char *name, char *args[], PCB_t *pcb)
+{
+    int fd;
+    struct load_info li;
+
+    if ((fd = open(name, O_RDONLY)) < 0) {
+        TracePrintf(0, "LoadProgram: cannot open %s\n", name);
+        return ERROR;
+    }
+
+    if (LoadInfo(fd, &li) != LI_NO_ERROR) {
+        TracePrintf(0, "LoadProgram: invalid executable\n");
+        close(fd);
+        return ERROR;
+    }
+
+    int arg_count = 0;
+    int arg_size = 0;
+
+    while (args[arg_count] != NULL) {
+        arg_size += strlen(args[arg_count]) + 1;
+        arg_count++;
+    }
+
+    char *stack_top = (char *)VMEM_1_LIMIT;
+    char *arg_block = stack_top - arg_size;
+
+    int text_start = li.t_vaddr >> PAGESHIFT;
+    int data_start = li.id_vaddr >> PAGESHIFT;
+
+    int total_pages = li.t_npg + li.id_npg + li.ud_npg;
+
+    if (total_pages >= MAX_PT_LEN) {
+        close(fd);
+        return ERROR;
+    }
+
+    free_region1(pcb->r1pt);
+
+    lseek(fd, li.t_faddr, SEEK_SET);
+
+    for (int i = 0; i < li.t_npg; i++) {
+        int vpn = text_start + i;
+        int pfn = find_free();
+        if (pfn < 0) return ERROR;
+
+        frames[pfn] = 1;
+
+        pcb->r1pt[vpn].valid = 1;
+        pcb->r1pt[vpn].pfn = pfn;
+        pcb->r1pt[vpn].prot = PROT_READ | PROT_EXEC;
+
+        read(fd, (void *)(vpn << PAGESHIFT), PAGESIZE);
+    }
+
+
+    lseek(fd, li.id_faddr, SEEK_SET);
+
+    for (int i = 0; i < li.id_npg; i++) {
+        int vpn = data_start + i;
+        int pfn = find_free();
+        if (pfn < 0) return ERROR;
+
+        frames[pfn] = 1;
+
+        pcb->r1pt[vpn].valid = 1;
+        pcb->r1pt[vpn].pfn = pfn;
+        pcb->r1pt[vpn].prot = PROT_READ | PROT_WRITE;
+
+        read(fd, (void *)(vpn << PAGESHIFT), PAGESIZE);
+    }
+
+
+    if (li.ud_npg > 0) {
+        bzero((void *)li.id_end, li.ud_end - li.id_end);
+    }
+
+
+    int stack_vpn = (VMEM_1_LIMIT >> PAGESHIFT) - 1;
+
+    int pfn = find_free();
+    if (pfn < 0) return ERROR;
+	frames[pfn] = 1;
+
+    pcb->r1pt[stack_vpn].valid = 1;
+    pcb->r1pt[stack_vpn].pfn = pfn;
+    pcb->r1pt[stack_vpn].prot = PROT_READ | PROT_WRITE;
+
+
+    pcb->usr_ctx.pc = (void *)li.entry;
+    pcb->usr_ctx.sp = (void *)VMEM_1_LIMIT;
+
+    char *cp = arg_block;
+    for (int i = 0; i < arg_count; i++) {
+        strcpy(cp, args[i]);
+        cp += strlen(args[i]) + 1;
+    }
+
+    close(fd);
+
+ 
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+
+    return SUCCESS;
+}
 
 extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	TracePrintf(DEBUG, "KernelStart\n");
@@ -145,7 +270,7 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	WriteRegister(REG_VM_ENABLE, 1);/*ENABLE THE BIG VM*/
 	WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_ALL); /*tmv flush*/
 
-    if (LoadProgram(argv, argv, ctx) != LI_NO_ERROR) {
+    if (LoadProgram(argv[0], argv, current_process) != LI_NO_ERROR) {
     	TracePrintf(0, "Failed to load init program\n");
     	Halt();
 	} /*stack is at top of region 1 [2]*/
@@ -155,11 +280,9 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 }
 
 
-
-
 int SetKernelBrk(void *addr) {
     unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
-    unsigned int curr_brk = (unsigned int)UP_TO_PAGE(current_kernel_brk);
+    unsigned int curr_brk = (unsigned int)UP_TO_PAGE(curr_kbrk);
 
 	if (new_brk >= KERNEL_STACK_BASE) {
         TracePrintf(0, "SetKernelBrk: Error - Kernel heap collision with kernel stack.\n");
@@ -167,7 +290,7 @@ int SetKernelBrk(void *addr) {
     } /*looking for collision between  new break and kernel stack base. The heap cannot start behind the stack*/
 
 	if (ReadRegister(REG_VM_ENABLE) == 0) {
-        current_kernel_brk = (void *)new_brk;
+        curr_kbrk = (void *)new_brk;
         return SUCCESS;
     } /*check for enabled VM*/
 
