@@ -12,8 +12,8 @@ void *IVT[TRAP_VECTOR_SIZE]
 pte_t r1pt[MAX_PT_LEN];
 PCB_t *ipcb = NULL;
 PCB_t *current_process = NULL;
-PCB_t *ready_queue_head = NULL;
-PCB_t *sleep_queue_head = NULL;
+PCB_t *ready_queue_head;
+PCB_t *sleep_queue_head;
 
 void *curr_kbrk;
 
