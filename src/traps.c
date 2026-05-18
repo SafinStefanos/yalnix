@@ -17,8 +17,22 @@
 
 // Plan is to move all of these to their own functions when actually implementing
 void thandler(UserContext usr_cont) {
+	 switch (ctx->vector) {
+        
+        case TRAP_CLOCK:
+            TracePrintf(1, "TRAP_CLOCK\n");
+            break;
+        case TRAP_KERNEL:
+            /*Hex for format. example, 0xabcdef01.*/
+            TracePrintf(1, "TRAP_KERNEL: syscall code 0x%x\n", ctx->code);
+            break;
+        default: /*unexpected trap occurences*/
+            TracePrintf(0, "Unhandled trap: %d at PC %p\n", ctx->vector, ctx->pc);
+            /*maybe halt here irl if kernel error*/
+            break;
+    }
+}
 /*
-
 	if(usr_cont==TRAP_KERNEL)
 		Long conditional statement to figure out which syscall happened
 		Make sure syscall is valid and possible
@@ -50,5 +64,5 @@ void thandler(UserContext usr_cont) {
 	
 */
 	
-}
+
 
