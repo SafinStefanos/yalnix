@@ -2,10 +2,11 @@
 #include <traps.h>
 #include <load_info.h>
 #include <yalnix.h>
-#include "procs.h"
+#include <procs.h>
+#include <struct_helpers.h>
 
 
-unsigned char frames[MAX_PMEM_SIZE/PAGESIZE];
+unsigned char frames_open[MAX_PMEM_SIZE/PAGESIZE];
 pte_t KernelPT[MAX_PT_LEN];
 void *IVT[TRAP_VECTOR_SIZE]
 pte_t r1pt[MAX_PT_LEN];
@@ -125,7 +126,14 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 
 	int kstack_idx = KERNEL_STACK_BASE >> PAGESHIFT;
 	for (i = 0; i < 2; i++) { /*allocate for 2 frames*/
-  		int f = find_free(); /*have not made yet*/
+		int f = 0;
+		for (int j = 0; j < frames.length; j++) {
+			if (frames[j] == 0) {
+				f = j;
+				break;
+			}
+		}
+		// int f = find_free();
     	frames[f] = 1;
     	KernelPT[kstack_idx + i].valid = 1;
     	KernelPT[kstack_idx + i].pfn = f; 
@@ -182,7 +190,8 @@ int SetKernelBrk(void *addr) {
 			KernelPT[i].pfn=f;
 			KernelPT[i].prot= PROT_READ | PROT_WRITE;
 		}
-	}else if(new_vpn<curr_vpn){ /*shrinking heap*/
+	} 
+	else if(new_vpn<curr_vpn){ /*shrinking heap*/
 		for(i=new_vpn; i<curr_vpn; i++){
 			if(KernelPT[i].valid){
 				helper_force_free(KernelPT[i].pfn); /*free frame*/
