@@ -174,19 +174,7 @@ typedef struct pte pte_t;
 #define S_READY   1
 #define S_BLOCKED 2
 
-typedef struct PCB{
-  UserContext usr_ctx;
-  KernelContext krn_ctx;
-  pte_t *r1pt;
-  int pid;
-  int ppid;
-  int state;
-  int exstat;
-  int kstack_pfn[4];
-  struct PCB *child_pcb->parent = current_process;
-  struct PCB *child_pcb->next_sibling = current_process->children;
-  struct PCB *current_process->children = child_pcb;
-} PCB_t;
+
 
 /*
  * Define the protection bits used in page table entries.
@@ -239,6 +227,19 @@ struct kernel_context {
 
 typedef struct kernel_context KernelContext;
 
+typedef struct PCB{
+  UserContext usr_ctx;
+  KernelContext krn_ctx;
+  pte_t *r1pt;
+  int pid;
+  int ppid;
+  int state;
+  int exstat;
+  int kstack_pfn[4];
+  struct PCB *child_pcb->parent = current_process;
+  struct PCB *child_pcb->next_sibling = current_process->children;
+  struct PCB *current_process->children = child_pcb;
+} PCB_t;
 
 /*
  *  Define the interrupt and exception vector numbers.  These numbers
