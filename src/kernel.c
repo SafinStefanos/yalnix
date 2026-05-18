@@ -12,6 +12,7 @@ pte_t r1pt[MAX_PT_LEN];
 PCB_t *ipcb = NULL;
 PCB_t *current_process = NULL;
 PCB_t *ready_queue_head = NULL;
+PCB_t *sleep_queue_head = NULL;
 
 /*
 
@@ -67,6 +68,8 @@ KCSwitch
 extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	TracePrintf(DEBUG, "KernelStart\n");
 
+	ready_queue_head = NULL;
+    sleep_queue_head = NULL;
 	int num_frames = pmem_size/PAGESIZE; /*how many r actually possible?*/
 	int i;
 	for(i=0; i<num_frames; i++){ /*make free*/
