@@ -5,7 +5,7 @@
 #include "procs.h"
 
 
-unsigned char frame_tracker[(MAX_PMEM_SIZE / PAGESIZE) / 8];
+unsigned char frames[(MAX_PMEM_SIZE / PAGESIZE) / 8];
 pte_t KernelPT[MAX_PT_LEN];
 void (*IVT[TRAP_VECTOR_SIZE])(UserContext *));
 pte_t r1pt[MAX_PT_LEN];
@@ -101,7 +101,7 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	
 	// Clear the Region 1 table
 for(i=0; i<MAX_PT_LEN; i++){
-    rpt1[i].valid = 0;
+    r1pt[i].valid = 0;
 	}
 
 	
@@ -109,9 +109,9 @@ for(i=0; i<MAX_PT_LEN; i++){
 	frames[idle_stack_frame] = 1; /*now in use*/
 
 	/*map last page of region 1 to this frame*/
-	rpt1[MAX_PT_LEN-1].valid = 1;
-	rpt1[MAX_PT_LEN-1].pfn = idle_stack_frame;
-	rpt1[MAX_PT_LEN-1].prot = PROT_READ | PROT_WRITE;
+	r1pt[MAX_PT_LEN-1].valid = 1;
+	r1pt[MAX_PT_LEN-1].pfn = idle_stack_frame;
+	r1pt[MAX_PT_LEN-1].prot = PROT_READ | PROT_WRITE;
 
 	/*map to hardware*/
 	WriteRegister(REG_PTBR1, (unsigned int)r1pt);
