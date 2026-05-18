@@ -1,5 +1,4 @@
 #include <hardware.h>
-#include <pagetable.h>
 #include <stdbool.h>
 
 #ifndef _PCB_H
