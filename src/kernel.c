@@ -7,7 +7,7 @@
 
 unsigned char frames[(MAX_PMEM_SIZE / PAGESIZE) / 8];
 pte_t KernelPT[MAX_PT_LEN];
-void (*IVT[TRAP_VECTOR_SIZE])(UserContext *));
+void (*IVT[TRAP_VECTOR_SIZE])(UserContext *);
 pte_t r1pt[MAX_PT_LEN];
 pcb_t *ipcb;
 
