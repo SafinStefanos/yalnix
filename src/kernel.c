@@ -14,6 +14,9 @@ PCB_t *current_process = NULL;
 PCB_t *ready_queue_head = NULL;
 PCB_t *sleep_queue_head = NULL;
 
+void *curr_kbrk;
+
+
 /*
 
 SetKernelBrk
@@ -128,6 +131,8 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
     	KernelPT[kstack_idx + i].pfn = f; 
     	KernelPT[kstack_idx + i].prot = PROT_READ | PROT_WRITE;
 	}
+	
+	curr_kbrk = (void *)UP_TO_PAGE(sbrk(0)); /*initialized for top of kernel heap*/
 
 	WriteRegister(REG_VM_ENABLE, 1);/*ENABLE THE BIG VM*/
 	WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_ALL); /*tmv flush*/
@@ -141,15 +146,53 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	
 }
 
-void idlin(void){
-	while(1){
-		TracePrintf(1, "idle\n");
-        Pause();
-	}
-}
+
 
 
 int SetKernelBrk(void *addr) {
-    /*will add logic later*/
-    return 0; 
+    unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
+    unsigned int curr_brk = (unsigned int)UP_TO_PAGE(current_kernel_brk);
+
+	if (new_brk >= KERNEL_STACK_BASE) {
+        TracePrintf(0, "SetKernelBrk: Error - Kernel heap collision with kernel stack.\n");
+        return ERROR;
+    } /*looking for collision between  new break and kernel stack base. The heap cannot start behind the stack*/
+
+	if (ReadRegister(REG_VM_ENABLE) == 0) {
+        current_kernel_brk = (void *)new_brk;
+        return SUCCESS;
+    } /*check for enabled VM*/
+
+	int curr_vpn = curr_brk >> PAGESHIFT; /*getting VPNs*/
+    int new_vpn = new_brk >> PAGESHIFT;
+
+	if(new_vpn>curr_vpn){
+		for(int i=curr_vpn; i<new_vpn; i++){
+			int f =find_free();
+			if(f==ERROR){
+				TracePrintf(0, "SetKernelBrk: Out of physical memory.\n");
+				for(int j=curr_vpn; j<i; j++){
+					helper_force_free(KernelPT[j].pfn);
+					KernelPT[j].valid=0;
+				}
+				WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+				return ERROR;
+			}
+			KernelPT[i].valid=1; /*mapping new page*/
+			KernelPT[i].pfn=f;
+			KernelPT[i].prot= PROT_READ | PROT_WRITE;
+		}
+	}else if(new_vpn<curr_vpn){ /*shrinking heap*/
+		for(i=new_vpn; i<curr_vpn; i++){
+			if(KernelPT[i].valid){
+				helper_force_free(KernelPT[i].pfn); /*free frame*/
+				KernelPT[i].valid = 0;
+			}
+		}
+	}
+
+	curr_kbrk=(void *)new_brk;
+	WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+	
+    return SUCCESS; 
 }
