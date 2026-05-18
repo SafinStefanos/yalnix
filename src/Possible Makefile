@@ -1,0 +1,35 @@
+# make sure u do export YALNIX_FRAMEWORK=/path/to/framework
+DDIR58 = $(YALNIX_FRAMEWORK)
+
+# Directories for headers and libraries
+LIBDIR = $(DDIR58)/lib
+INCDIR = $(DDIR58)/include
+ETCDIR = $(DDIR58)/etc
+
+# Compiler and 32-bit flags (Required for DCS 58 simulation)
+CC = gcc
+CFLAGS = -g -m32 -I$(INCDIR) -Wall
+LDFLAGS = -m32 -L$(LIBDIR) -Wl,-T,$(ETCDIR)/kernel.x
+
+#lhelper is required for helper_force_free, etc.
+LIBS = -lkernel -lhardware -lhelper
+
+# Source files and objects
+SRC = kernel.c syscalls.c traps.c load.c
+OBJ = $(SRC:.c=.o)
+
+all: yalnix
+
+yalnix: $(OBJ)
+	$(CC) $(LDFLAGS) -o $@ $(OBJ) $(LIBS)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Standard cleanup
+clean:
+	rm -f $(OBJ) yalnix TRACE TTYLOG.* core
+
+# Essential for cleaning up background hardware processes after a crash
+kill:
+	killall -9 yalnix yalnixtty yalnixnet 2>/dev/null || true
