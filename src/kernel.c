@@ -8,7 +8,8 @@
 unsigned char frame_tracker[(MAX_PMEM_SIZE / PAGESIZE) / 8];
 pte_t KernelPT[MAX_PT_LEN];
 void (*IVT[TRAP_VECTOR_SIZE])(UserContext *));
-pte_t rpt1[MAX_PT_LEN];
+pte_t r1pt[MAX_PT_LEN];
+pcb_t *ipcb;
 
 
 /*
@@ -98,6 +99,24 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 
 	WriteRegister(REG_VECTOR_BASE, (unsigned int)IVT);
 	
+	// Clear the Region 1 table
+for (i = 0; i < MAX_PT_LEN; i++) {
+    rpt1[i].valid = 0;
+	}
+
+	
+	int idle_stack_frame = _orig_kernel_brk_page + 2; /*user stack gets first free page/frame*/
+	frames[idle_stack_frame] = 1; /*now in use*/
+
+	/*map last page of region 1 to this frame*/
+	rpt1[MAX_PT_LEN - 1].valid = 1;
+	rpt1[MAX_PT_LEN - 1].pfn = idle_stack_frame;
+	rpt1[MAX_PT_LEN - 1].prot = PROT_READ | PROT_WRITE;
+
+	/*map to hardware*/
+	WriteRegister(REG_PTBR1, (unsigned int)rpt1);
+	WriteRegister(REG_PTLR1, MAX_PT_LEN);
+
 }
 
 
