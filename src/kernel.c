@@ -10,6 +10,7 @@ pte_t KernelPT[MAX_PT_LEN];
 void (*IVT[TRAP_VECTOR_SIZE])(UserContext *);
 pte_t r1pt[MAX_PT_LEN];
 pcb_t *ipcb;
+ipcb = (pcb_t *)malloc(sizeof(pcb_t));
 
 
 /*
@@ -116,7 +117,27 @@ for(i=0; i<MAX_PT_LEN; i++){
 	/*map to hardware*/
 	WriteRegister(REG_PTBR1, (unsigned int)r1pt);
 	WriteRegister(REG_PTLR1, MAX_PT_LEN);
+	WriteRegister(REG_PTBR0, (unsigned int)KernelPT);
+	WriteRegister(REG_PTLR0, MAX_PT_LEN);
 
+	int kstack_idx= KERNEL_STACK_BASE >> PAGESHIFT;
+	KernelPT[kstack_idx].valid = 1;
+	KernelPT[kstack_idx].pfn = kstack_idx;
+	KernelPT[kstack_idx].prot = PROT_READ | PROT_WRITE;
+	KernelPT[kstack_idx+1].valid = 1;
+	KernelPT[kstack_idx+1].pfn = kstack_idx+1;
+	KernelPT[kstack_idx+1].prot = PROT_READ | PROT_WRITE;
+
+	ipcb=(pcb_t *)malloc(sizeof(pcb_t));
+    ipcb->pid = helper_new_pid(r1pt); /*pid*/
+    WriteRegister(REG_VM_ENABLE, 1); [4] /*ENABLE THE BIG VM*/
+
+    // E. "Cook" the context to jump to the Idle loop in user mode
+    ctx->pc = (void *)&DoIdle;      // Start at your loop function [2]
+    ctx->sp = (void *)VMEM_1_LIMIT; // Stack is at the top of Region 1 [2]
+
+    TracePrintf(0, "Leaving KernelStart, entering user mode...\n");
+	
 }
 
 
