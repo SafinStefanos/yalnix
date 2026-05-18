@@ -276,6 +276,8 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
     	TracePrintf(0, "Failed to load init program\n");
     	Halt();
 	} /*stack is at top of region 1 [2]*/
+	
+    *ctx = current_process->usr_ctx;
 
     TracePrintf(0, "Leaving KernelStart, entering user mode...\n");
 	
