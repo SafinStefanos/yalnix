@@ -19,6 +19,8 @@ PCB_t *sleep_queue_head;
 
 void *curr_kbrk;
 
+void DoIdle(void);
+
 
 /*
 
@@ -327,6 +329,13 @@ int SetKernelBrk(void *addr) {
 	WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 	
     return SUCCESS; 
+}
+
+void DoIdle(void){
+	while(1){
+		TracePrintf(1,"DoIdle\n");
+    	Pause();
+  	}
 }
 
 
