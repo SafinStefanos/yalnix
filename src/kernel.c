@@ -8,6 +8,7 @@
 unsigned char frame_tracker[(MAX_PMEM_SIZE / PAGESIZE) / 8];
 pte_t KernelPT[MAX_PT_LEN];
 void (*IVT[TRAP_VECTOR_SIZE])(UserContext *));
+pte_t rpt1[MAX_PT_LEN];
 
 
 /*
@@ -96,4 +97,13 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	}
 
 	WriteRegister(REG_VECTOR_BASE, (unsigned int)IVT);
+	
+}
+
+
+
+
+int SetKernelBrk(void *addr) {
+    /*will add logic later*/
+    return 0; 
 }
