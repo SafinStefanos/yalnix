@@ -6,9 +6,9 @@
 #include <struct_helpers.h>
 
 
-unsigned char frames_open[MAX_PMEM_SIZE/PAGESIZE];
+unsigned char frames[MAX_PMEM_SIZE/PAGESIZE];
 pte_t KernelPT[MAX_PT_LEN];
-void *IVT[TRAP_VECTOR_SIZE]
+void *IVT[TRAP_VECTOR_SIZE];
 pte_t r1pt[MAX_PT_LEN];
 PCB_t *ipcb = NULL;
 PCB_t *current_process = NULL;
@@ -71,7 +71,7 @@ KCSwitch
 
 extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	TracePrintf(DEBUG, "KernelStart\n");
-
+	
 	ready_queue_head = NULL;
     sleep_queue_head = NULL;
 	int num_frames = pmem_size/PAGESIZE; /*how many r actually possible?*/
@@ -109,7 +109,7 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	for(i = 0; i < TRAP_VECTOR_SIZE; i++){
     	IVT[i] = &thandler; 
 	}
-	WriteRegister(REG_VECTOR_BASE, (unsigned int)IVT);
+	WriteRegister(REG_VECTOR_BASE, (unsigned int)(&(IVT[0])));
 	
 	
 	current_process = (PCB_t *)malloc(sizeof(PCB_t)); /*Init process PCB*/
@@ -127,7 +127,7 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	int kstack_idx = KERNEL_STACK_BASE >> PAGESHIFT;
 	for (i = 0; i < 2; i++) { /*allocate for 2 frames*/
 		int f = 0;
-		for (int j = 0; j < frames.length; j++) {
+		for (int j = 0; j < num_frames; j++) {
 			if (frames[j] == 0) {
 				f = j;
 				break;
@@ -192,7 +192,7 @@ int SetKernelBrk(void *addr) {
 		}
 	} 
 	else if(new_vpn<curr_vpn){ /*shrinking heap*/
-		for(i=new_vpn; i<curr_vpn; i++){
+		for(int i=new_vpn; i<curr_vpn; i++){
 			if(KernelPT[i].valid){
 				helper_force_free(KernelPT[i].pfn); /*free frame*/
 				KernelPT[i].valid = 0;
@@ -205,3 +205,4 @@ int SetKernelBrk(void *addr) {
 	
     return SUCCESS; 
 }
+
