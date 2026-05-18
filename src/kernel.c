@@ -2,7 +2,6 @@
 #include <traps.h>
 #include <load_info.h>
 #include <yalnix.h>
-#include <procs.h>
 #include <struct_helpers.h>
 
 
