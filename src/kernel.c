@@ -82,25 +82,25 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
     	KernelPT[i].valid = 0; /*Not used yet*/
 	}
 
-	for(i=_first_kernel_text_page; i < _first_kernel_data_page; i++){
+	for(i=_first_kernel_text_page; i< _first_kernel_data_page; i++){
     	KernelPT[i].valid = 1;
    		KernelPT[i].pfn = i; /*VPN i -> PFN i*/
     	KernelPT[i].prot = PROT_READ | PROT_EXEC;
 	}
-	for (i = _first_kernel_data_page; i < _orig_kernel_brk_page; i++) {
+	for(i=_first_kernel_data_page; i<_orig_kernel_brk_page; i++){
     	KernelPT[i].valid = 1;
     	KernelPT[i].pfn = i; /*map*/
     	KernelPT[i].prot = PROT_READ | PROT_WRITE;
 	}
 	
-	for (i = 0; i < TRAP_VECTOR_SIZE; i++) {
+	for(i = 0; i < TRAP_VECTOR_SIZE; i++){
     	IVT[i] = &thandler; 
 	}
 
 	WriteRegister(REG_VECTOR_BASE, (unsigned int)IVT);
 	
 	// Clear the Region 1 table
-for (i = 0; i < MAX_PT_LEN; i++) {
+for(i=0; i<MAX_PT_LEN; i++){
     rpt1[i].valid = 0;
 	}
 
@@ -109,9 +109,9 @@ for (i = 0; i < MAX_PT_LEN; i++) {
 	frames[idle_stack_frame] = 1; /*now in use*/
 
 	/*map last page of region 1 to this frame*/
-	rpt1[MAX_PT_LEN - 1].valid = 1;
-	rpt1[MAX_PT_LEN - 1].pfn = idle_stack_frame;
-	rpt1[MAX_PT_LEN - 1].prot = PROT_READ | PROT_WRITE;
+	rpt1[MAX_PT_LEN-1].valid = 1;
+	rpt1[MAX_PT_LEN-1].pfn = idle_stack_frame;
+	rpt1[MAX_PT_LEN-1].prot = PROT_READ | PROT_WRITE;
 
 	/*map to hardware*/
 	WriteRegister(REG_PTBR1, (unsigned int)rpt1);
