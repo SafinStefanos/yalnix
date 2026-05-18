@@ -114,7 +114,7 @@ for(i=0; i<MAX_PT_LEN; i++){
 	rpt1[MAX_PT_LEN-1].prot = PROT_READ | PROT_WRITE;
 
 	/*map to hardware*/
-	WriteRegister(REG_PTBR1, (unsigned int)rpt1);
+	WriteRegister(REG_PTBR1, (unsigned int)r1pt);
 	WriteRegister(REG_PTLR1, MAX_PT_LEN);
 
 }
