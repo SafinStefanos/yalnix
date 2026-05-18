@@ -10,8 +10,6 @@ pte_t KernelPT[MAX_PT_LEN];
 void (*IVT[TRAP_VECTOR_SIZE])(UserContext *);
 pte_t r1pt[MAX_PT_LEN];
 pcb_t *ipcb;
-ipcb = (pcb_t *)malloc(sizeof(pcb_t));
-
 
 /*
 
@@ -132,15 +130,19 @@ for(i=0; i<MAX_PT_LEN; i++){
     ipcb->pid = helper_new_pid(r1pt); /*pid*/
     WriteRegister(REG_VM_ENABLE, 1); [4] /*ENABLE THE BIG VM*/
 
-    // E. "Cook" the context to jump to the Idle loop in user mode
-    ctx->pc = (void *)&DoIdle;      // Start at your loop function [2]
-    ctx->sp = (void *)VMEM_1_LIMIT; // Stack is at the top of Region 1 [2]
+    ctx->pc = (void *)&idlin;      /*idle*/
+    ctx->sp = (void *)VMEM_1_LIMIT; /*stack is at top of region 1 [2]*/
 
     TracePrintf(0, "Leaving KernelStart, entering user mode...\n");
 	
 }
 
-
+void idlin(void){
+	while(1){
+		TracePrintf(1, "idle\n");
+        Pause();
+	}
+}
 
 
 int SetKernelBrk(void *addr) {
