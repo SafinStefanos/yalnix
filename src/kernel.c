@@ -88,113 +88,6 @@ static void free_region1(pte_t *pt) {
     }
 }
 
-
-int LoadProgram(char *name, char *args[], PCB_t *pcb)
-{
-    int fd;
-    struct load_info li;
-
-    if ((fd = open(name, O_RDONLY)) < 0) {
-        TracePrintf(0, "LoadProgram: cannot open %s\n", name);
-        return ERROR;
-    }
-
-    if (LoadInfo(fd, &li) != LI_NO_ERROR) {
-        TracePrintf(0, "LoadProgram: invalid executable\n");
-        close(fd);
-        return ERROR;
-    }
-
-    int arg_count = 0;
-    int arg_size = 0;
-
-    while (args[arg_count] != NULL) {
-        arg_size += strlen(args[arg_count]) + 1;
-        arg_count++;
-    }
-
-    char *stack_top = (char *)VMEM_1_LIMIT;
-    char *arg_block = stack_top - arg_size;
-
-    int text_start = li.t_vaddr >> PAGESHIFT;
-    int data_start = li.id_vaddr >> PAGESHIFT;
-
-    int total_pages = li.t_npg + li.id_npg + li.ud_npg;
-
-    if (total_pages >= MAX_PT_LEN) {
-        close(fd);
-        return ERROR;
-    }
-
-    free_region1(pcb->r1pt);
-
-    lseek(fd, li.t_faddr, SEEK_SET);
-
-    for (int i = 0; i < li.t_npg; i++) {
-        int vpn = text_start + i;
-        int pfn = find_free();
-        if (pfn < 0) return ERROR;
-
-        frames[pfn] = 1;
-
-        pcb->r1pt[vpn].valid = 1;
-        pcb->r1pt[vpn].pfn = pfn;
-        pcb->r1pt[vpn].prot = PROT_READ | PROT_EXEC;
-
-        read(fd, (void *)(vpn << PAGESHIFT), PAGESIZE);
-    }
-
-
-    lseek(fd, li.id_faddr, SEEK_SET);
-
-    for (int i = 0; i < li.id_npg; i++) {
-        int vpn = data_start + i;
-        int pfn = find_free();
-        if (pfn < 0) return ERROR;
-
-        frames[pfn] = 1;
-
-        pcb->r1pt[vpn].valid = 1;
-        pcb->r1pt[vpn].pfn = pfn;
-        pcb->r1pt[vpn].prot = PROT_READ | PROT_WRITE;
-
-        read(fd, (void *)(vpn << PAGESHIFT), PAGESIZE);
-    }
-
-
-    if (li.ud_npg > 0) {
-        bzero((void *)li.id_end, li.ud_end - li.id_end);
-    }
-
-
-    int stack_vpn = (VMEM_1_LIMIT >> PAGESHIFT) - 1;
-
-    int pfn = find_free();
-    if (pfn < 0) return ERROR;
-	frames[pfn] = 1;
-
-    pcb->r1pt[stack_vpn].valid = 1;
-    pcb->r1pt[stack_vpn].pfn = pfn;
-    pcb->r1pt[stack_vpn].prot = PROT_READ | PROT_WRITE;
-
-
-    pcb->usr_ctx.pc = (void *)li.entry;
-    pcb->usr_ctx.sp = (void *)VMEM_1_LIMIT;
-
-    char *cp = arg_block;
-    for (int i = 0; i < arg_count; i++) {
-        strcpy(cp, args[i]);
-        cp += strlen(args[i]) + 1;
-    }
-
-    close(fd);
-
- 
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
-
-    return SUCCESS;
-}
-
 extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	TracePrintf(DEBUG, "KernelStart\n");
 	
@@ -285,11 +178,6 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 
 	WriteRegister(REG_VM_ENABLE, 1);/*ENABLE THE BIG VM*/
 	WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_ALL); /*tmv flush*/
-/*
-    if (LoadProgram(argv[0], argv, current_process) != LI_NO_ERROR) {
-    	TracePrintf(0, "Failed to load init program\n");
-    	Halt();
-	} /*stack is at top of region 1 [2]*/
 
 	current_process->usr_ctx = *ctx; 
 	current_process->usr_ctx.pc = (void *)DoIdle; 
