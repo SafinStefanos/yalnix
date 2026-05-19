@@ -2,6 +2,7 @@
 #include <traps.h>
 #include <yalnix.h>
 #include <ykernel.h>
+#include "memory.h"
 
 void *IVT[TRAP_VECTOR_SIZE];
 PCB_t *current_process = NULL;
