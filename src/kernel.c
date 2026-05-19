@@ -268,6 +268,21 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 	
 	curr_kbrk = (void *)UP_TO_PAGE(sbrk(0)); /*initialized for top of kernel heap*/
 
+	
+	int svpn = (VMEM_1_LIMIT >> PAGESHIFT) - 1; /*index for last page in r1*/
+
+	
+	int fus = find_free(); /*find a physical frame for the user stack*/
+	frames[fus] = 1;
+
+	// Map the user stack page in the idle process's page table [6]
+	current_process->r1pt[svpn].valid = 1;
+	current_process->r1pt[svpn].pfn = fus;
+	current_process->r1pt[svpn].prot = PROT_READ | PROT_WRITE; // [11, 12]
+
+	
+	current_process->pid = helper_new_pid(current_process->r1pt);/*get pid for new process*/
+
 	WriteRegister(REG_VM_ENABLE, 1);/*ENABLE THE BIG VM*/
 	WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_ALL); /*tmv flush*/
 
