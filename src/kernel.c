@@ -285,11 +285,16 @@ extern void KernelStart (char **argv, unsigned int pmem_size, UserContext *ctx){
 
 	WriteRegister(REG_VM_ENABLE, 1);/*ENABLE THE BIG VM*/
 	WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_ALL); /*tmv flush*/
-
+/*
     if (LoadProgram(argv[0], argv, current_process) != LI_NO_ERROR) {
     	TracePrintf(0, "Failed to load init program\n");
     	Halt();
 	} /*stack is at top of region 1 [2]*/
+
+	current_process->usr_ctx = *ctx; 
+	current_process->usr_ctx.pc = (void *)DoIdle; 
+	current_process->usr_ctx.sp = (void *)VMEM_1_LIMIT;
+	*ctx = current_process->usr_ctx;
 
     TracePrintf(0, "Leaving KernelStart, entering user mode...\n");
 	
