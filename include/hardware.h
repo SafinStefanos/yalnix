@@ -155,6 +155,7 @@
 #define KERNEL_STACK_BASE \
 	DOWN_TO_PAGE(KERNEL_STACK_LIMIT - KERNEL_STACK_MAXSIZE)
 
+
 /*
  * Define the structure of a page table entry.
  */
@@ -164,15 +165,8 @@ struct pte {
 	u_long         : 4;	/* reserved; currently unused */
 	u_long pfn     : 24;	/* page frame number */
 };
-
 typedef struct pte pte_t;
 
-/* 
- * Defining a struct for PCB here
- */
-#define S_RUNNING 0
-#define S_READY   1
-#define S_BLOCKED 2
 
 
 
@@ -215,7 +209,6 @@ struct user_context {
 typedef struct user_context UserContext;
 
 
-
 // the context for a real userland program on your Linux host
 typedef ucontext_t LinuxContext;
 
@@ -223,11 +216,9 @@ typedef ucontext_t LinuxContext;
 struct kernel_context {
   LinuxContext lc;
   unsigned int kstack_cs;
-};
+}; typedef struct kernel_context KernelContext;
 
-typedef struct kernel_context KernelContext;
-
-typedef struct PCB{
+typedef struct PCB {
   UserContext usr_ctx;
   KernelContext krn_ctx;
   pte_t *r1pt;
@@ -236,10 +227,10 @@ typedef struct PCB{
   int state;
   int exstat;
   int kstack_pfn[4];
-  struct PCB *child_pcb->parent = current_process;
-  struct PCB *child_pcb->next_sibling = current_process->children;
-  struct PCB *current_process->children = child_pcb;
-} PCB_t;
+  struct PCB *parent;
+  struct PCB *sibling;
+  struct PCB *child;
+}; typedef struct PCB PCB_t;
 
 /*
  *  Define the interrupt and exception vector numbers.  These numbers

@@ -37,6 +37,9 @@
 
 
 
+#define DEBUG 2
+#define SUCCESS 0
+
 /*
  * Define the kernel call number for each of the supported kernel calls.
  */
@@ -84,8 +87,6 @@
 #define YALNIX_SEM_UP           ( 0x61 | YALNIX_PREFIX)
 #define YALNIX_SEM_DOWN         ( 0x62 | YALNIX_PREFIX)
 #define YALNIX_SHARED_PAGES      ( 0x80 | YALNIX_PREFIX)
-
-
 
 // in case you want to define new ones
 #define YALNIX_CUSTOM_0         ( 0x70 | YALNIX_PREFIX)
