@@ -2,9 +2,8 @@
 #define _YLIB_H_
 
 
-#ifndef _SIZE_T
+#ifndef size_t
 typedef unsigned int size_t;
-#define _SIZE_T
 #endif
 
 

@@ -6,14 +6,14 @@
 #
 #	Nov 30, 2022
 
+
+
 # Where's your kernel source?
 K_SRC_DIR = .
 
-# Added memory.c to the kernel sources
-K_SRCS = kernel.c traps.c syscalls.c idle.c memory.c
-
-# Added memory.h to the kernel include dependencies
-K_INCS = kernel.h hardware.h traps.h yalnix.h yuser.h ykernel.h idle.h memory.h
+# What are the kernel c and include files? 
+K_SRCS = kernel.c traps.c syscalls.c idle.c
+#K_INCS = kernel.h hardware.h traps.h yalnix.h yuser.h ykernel.h idle.h
 
 # Where's your user source?
 U_SRC_DIR = .
@@ -21,6 +21,7 @@ U_SRC_DIR = .
 # What are the user c and include files?
 U_SRCS = 
 U_INCS = 
+
 
 #==========================================================
 # you should not need to change anything below this line
