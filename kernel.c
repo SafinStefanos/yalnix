@@ -306,3 +306,17 @@ int SetKernelBrk(void *addr) {
     return SUCCESS; 
 }
 
+
+KernelContext *KCSwitch(KernelContext *kc_in, void *curr_pcb_p, void *next_pcb_p) { /*KCSwitch from curr_pcb to next_pcb*/
+    PCB_t *curr = (PCB_t *)curr_pcb_p;
+    PCB_t *next = (PCB_t *)next_pcb_p;
+
+    curr->kernel_ctx = *kc_in; /*ave the incoming kernel context into the old PCB*/
+
+    int kstack_vpn = KERNEL_STACK_BASE >> PAGESHIFT; /*Change Region 0 Page Table to map the kernel stack to the new process's frames*/
+    for (int i = 0; i < 2; i++) {
+        KernelPT[kstack_vpn + i].pfn = next->kstack_pfns[i];
+        KernelPT[kstack_vpn + i].valid = 1;
+        KernelPT[kstack_vpn + i].prot = PROT_READ | PROT_WRITE;
+    }
+
