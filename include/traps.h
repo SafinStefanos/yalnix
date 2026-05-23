@@ -1,4 +1,4 @@
 #include <hardware.h>
 #include <stdio.h>
 
-void thandler(UserContext usr_cont);
+void thandler(UserContext* usr_cont);

@@ -7,7 +7,6 @@
 #include <yalnix.h>
 #include <ykernel.h>
 #include <unistd.h>
-#include <idle.h>
 #include <fcntl.h>
 #include <struct_helpers.h>
 
@@ -68,5 +67,10 @@ extern int find_free(void);
  *   pt - pointer to the process's region1 page table
  */
 extern void free_region1(pte_t *pt);
+
+
+KernelContext *KCSInitFunc(KernelContext *kc_in, void *pcb_v, void *unused);
+
+KernelContext *KCSSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v);
 
 #endif
