@@ -83,7 +83,7 @@ void thandler(UserContext *usr_cont) {
 
         case TRAP_MEMORY:
             /*check for stack growth */
-            if (should_grow_stack(usr_cont->addr)) {
+            if (should_grows(usr_cont->addr)) {
                 if (grow_stack(usr_cont->addr) == SUCCESS) return;
             }
 
