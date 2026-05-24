@@ -178,6 +178,44 @@ int sys_wait(int *status_ptr) {
     }
 }
 
+/*check if memory fault is valid stack growth request */
+int should_grows(void *addr) {
+    unsigned int fault_addr = (unsigned int)addr;
+    unsigned int stack_top = (unsigned int)DOWN_TO_PAGE(current_process->usr_ctx.sp);
+    
+    /* fault must be in region 1, below current stack, and above heap break */
+    if (fault_addr < stack_top && fault_addr >= VMEM_1_BASE && fault_addr > (unsigned int)current_process->brk) {
+        /* enforce 1-page red zone: cannot grow into the page right above the heap */
+        if (fault_addr <= (unsigned int)current_process->brk + PAGESIZE) return 0;
+        return 1;
+    }
+    return 0;
+}
+
+int grow_stack(void *addr) {
+    unsigned int fault_addr = (unsigned int)DOWN_TO_PAGE(addr);
+    unsigned int current_stack_bottom = (unsigned int)DOWN_TO_PAGE(current_process->usr_ctx.sp);
+
+    /* allocate frames for every page between current bottom and fault*/
+    for (unsigned int p = current_stack_bottom - PAGESIZE; p >= fault_addr; p -= PAGESIZE) {
+        int f = find_free(); [7]
+        if (f == ERROR) return ERROR;
+        
+        frames[f] = 1; [9]
+        int vpn = (p - VMEM_1_BASE) >> PAGESHIFT;
+        current_process->r1pt[vpn].valid = 1;
+        current_process->r1pt[vpn].pfn = f;
+        current_process->r1pt[vpn].prot = PROT_READ | PROT_WRITE;
+    }
+
+    /* hardware sees new mappings */
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1); [10, 11]
+    return SUCCESS;
+}
+
+
+
+
 /*
 
 Fork
