@@ -1,4 +1,3 @@
-
 #include <hardware.h>
 #include <traps.h>
 #include <load_info.h>
@@ -9,58 +8,70 @@
 
 extern PCB_t* current_process;
 
-// Plan is to move all of these to their own functions when actually implementing
 void thandler(UserContext *usr_cont) {
-	 switch (usr_cont->vector) {
-        
+    switch (usr_cont->vector) {
         case TRAP_CLOCK:
-            TracePrintf(1, "TRAP_CLOCK\n");
-		
-			memcpy(&current_process->usr_ctx, usr_cont, sizeof(UserContext));
-			PCB_t *prev = current_process;
-			current_process = current_process->sibling;  // update BEFORE switch
+            TracePrintf(1, "TRAP_CLOCK: PID %d\n", current_process->pid);
 
-			if (KernelContextSwitch(KCSwitchFunc, prev, current_process) == -1) {
-				TracePrintf(0, "trap_clock: KernelContextSwitch failed\n");
-				current_process = prev;  // roll back on failure
-				break;
-			}
-			memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
-			break;
+            /* save hardware state of the current process into its pcb*/
+            current_process->usr_ctx = *usr_cont;
+
+            /* pick next*/
+            PCB_t *old_process = current_process;
+            current_process = current_process->sibling;
+
+      		/*kernel stack and context switch*/
+           /* returns only when the scheduler eventually picks 'old_process' again*/
+            if (KernelContextSwitch(KCSwitchFunc, old_process, current_process) == -1) {
+                TracePrintf(0, "trap_clock: KernelContextSwitch failed\n");
+                Halt();
+            }
+
+            /*remap region 1 to new pt*/
+            WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
+            WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+
+            //restote hardware
+            *usr_cont = current_process->usr_ctx;
+            break;
 
         case TRAP_KERNEL:
-            /*Hex for format. example, 0xabcdef01.*/
             TracePrintf(1, "TRAP_KERNEL: syscall code 0x%x\n", usr_cont->code);
-			switch (usr_cont->code) {
-				case YALNIX_BRK:
-					TracePrintf(1, "Brk Syscall\n");
-					//sys_brk(current_process, (void*)usr_cont->regs[0]);
-					break;
-				case YALNIX_GETPID:
-					TracePrintf(1, "GetPid Syscall\n");
-					if (current_process == NULL) {
-        				TracePrintf(0, "GETPID: current_process is NULL!\n");
-        				usr_cont->regs[0] = ERROR;
-        				break;
-    				}
-					usr_cont->regs[0] = sys_getpid(current_process);
-					TracePrintf(1, "PID = %d\n", usr_cont->regs[0]);
-					break;
-				case YALNIX_DELAY:
-					//usr_cont->regs[0] = sys_delay(current_process, usr_cont, (int)usr_cont->regs[0]);
-					TracePrintf(1, "Delay Syscall\n");
-					break;
-				default:
-					TracePrintf(1, "Unhandled Syscall\n");
-					break;
-			}
+            
+            /*Syscall Dispatcher*/
+            switch (usr_cont->code) {
+                case YALNIX_GETPID:
+                    /*PID returned in regs */
+                    usr_cont->regs = sys_getpid(current_process);
+                    break;
+                case YALNIX_BRK:
+                    /*Call brk*/
+                    usr_cont->regs = sys_brk(current_process, (void *)usr_cont->regs);
+                    break;
+                case YALNIX_DELAY:
+                    /*call delay*/
+                    usr_cont->regs = sys_delay(current_process, (int)usr_cont->regs);
+                    break;
+                default:
+                    TracePrintf(1, "Unhandled Syscall 0x%x\n", usr_cont->code);
+                    usr_cont->regs = ERROR;
+                    break;
+            }
             break;
-		
-		
-        default: /*unexpected trap occurences*/
-            TracePrintf(0, "Unhandled trap: %d at PC %p\n", usr_cont->vector, usr_cont->pc);
-            /*maybe halt here irl if kernel error*/
-			Pause();
+
+        case TRAP_MEMORY:
+            /* abort the process on illegal memory access */
+            /*stack logic*/
+            TracePrintf(0, "TRAP_MEMORY: Fault at addr %p, PID %d aborted\n", 
+                        usr_cont->addr, current_process->pid);
+            Halt(); /*halt on errors*/
+            break;
+
+        default: 
+            /* Handle TRAP_ILLEGAL, TRAP_MATH, etc*/
+            TracePrintf(0, "Unhandled trap: %d at PC %p, PID %d aborted\n", 
+                        usr_cont->vector, usr_cont->pc, current_process->pid);
+            Halt();
             break;
     }
 }
