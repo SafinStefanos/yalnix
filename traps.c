@@ -41,16 +41,15 @@ void thandler(UserContext *usr_cont) {
             /* perform the kernel stack and context switch */
             KernelContextSwitch(KCSwitchFunc, old_process, current_process);
 
-            /* mandatory hardware remap of region one and tlb flush */
+            /*hardware remap of region one and tlb flush */
             WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
-            /* restore hardware state for return to user mode */
+            /*restore hardware state for return to user mode */
             memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
 
         case TRAP_KERNEL:
-            /* syscall dispatcher for checkpoint three calls */
             switch (usr_cont->code) {
                 case YALNIX_GETPID:
                     usr_cont->regs = current_process->pid;
@@ -68,12 +67,12 @@ void thandler(UserContext *usr_cont) {
             break;
 
         case TRAP_MEMORY:
-            /* check for the init death rule */
+            /* check for the init death rule*/
             if (current_process->pid == 1) {
                 TracePrintf(0, "init process aborted due to memory fault\n");
                 Halt();
             }
-            /* for now simply halt if any process hits a memory fault */
+            /*for now halt if process hits memory fault */
             Halt();
             break;
 
