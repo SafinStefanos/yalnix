@@ -160,8 +160,8 @@ int sys_wait(int *status_ptr) {
                 else prev->sibling = curr->sibling;
 
                 /* clean up child pcb and notify hardware helper */
-                helper_retire_pid(pid); [6]
-                free_region1(curr->r1pt); [7]
+                helper_retire_pid(pid); 
+                free_region1(curr->r1pt);
                 free(curr->r1pt);
                 free(curr); 
 
@@ -198,10 +198,10 @@ int grow_stack(void *addr) {
 
     /* allocate frames for every page between current bottom and fault*/
     for (unsigned int p = current_stack_bottom - PAGESIZE; p >= fault_addr; p -= PAGESIZE) {
-        int f = find_free(); [7]
+        int f = find_free(); 
         if (f == ERROR) return ERROR;
         
-        frames[f] = 1; [9]
+        frames[f] = 1; 
         int vpn = (p - VMEM_1_BASE) >> PAGESHIFT;
         current_process->r1pt[vpn].valid = 1;
         current_process->r1pt[vpn].pfn = f;
@@ -209,7 +209,7 @@ int grow_stack(void *addr) {
     }
 
     /* hardware sees new mappings */
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1); [10, 11]
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
     return SUCCESS;
 }
 
