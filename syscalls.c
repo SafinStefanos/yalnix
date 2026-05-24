@@ -7,21 +7,26 @@
 #include <traps.h>
 #include <kern.h>
 
-
- /* sys_brk: adjusts the user heap in region one */
+/* sys_brk: adjusts user heap with red zone and collision checks */
 int sys_brk(PCB_t *proc, void *addr) {
     unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
     unsigned int cur_brk = (unsigned int)UP_TO_PAGE(proc->brk);
 
-    /* validate that the heap does not collide with the stack or go too low */
+    /* ensure the heap does not go below the original data segment */
     if ((unsigned int)addr < (unsigned int)proc->heap_base) return ERROR;
-    if (new_brk >= (unsigned int)proc->usr_ctx.sp) return ERROR;
+
+    /* enforce red zone: leave at least one unmapped page below the stack */
+    unsigned int stack_limit = (unsigned int)DOWN_TO_PAGE(proc->usr_ctx.sp);
+    if (new_brk >= stack_limit - PAGESIZE) {
+        TracePrintf(0, "sys_brk: collision with stack red zone\n");
+        return ERROR;
+    }
 
     int cur_vpn = (cur_brk - VMEM_1_BASE) >> PAGESHIFT;
     int new_vpn = (new_brk - VMEM_1_BASE) >> PAGESHIFT;
 
     if (new_vpn > cur_vpn) {
-        /* growing the heap by allocating new frames */
+        /* growing the heap: allocate new frames */
         for (int i = cur_vpn; i < new_vpn; i++) {
             int f = find_free();
             if (f == ERROR) return ERROR;
@@ -31,7 +36,7 @@ int sys_brk(PCB_t *proc, void *addr) {
             proc->r1pt[i].prot = PROT_READ | PROT_WRITE;
         }
     } else if (new_vpn < cur_vpn) {
-        /* shrinking the heap by freeing frames */
+        /* shrinking the heap: free existing frames */
         for (int i = new_vpn; i < cur_vpn; i++) {
             if (proc->r1pt[i].valid) {
                 frames[proc->r1pt[i].pfn] = 0;
@@ -41,20 +46,20 @@ int sys_brk(PCB_t *proc, void *addr) {
     }
 
     proc->brk = (void *)new_brk;
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1); /* flush stale mappings */
     return SUCCESS;
 }
 
-/* sys_delay: moves process to sleep queue and yields cpu */
+/* sys_delay: validates input and moves process to sleep queue */
 int sys_delay(PCB_t *proc, int ticks) {
     if (ticks == 0) return SUCCESS;
-    if (ticks < 0) return ERROR;
+    if (ticks < 0) return ERROR; /* time travel is not allowed */
 
     proc->delay = ticks;
     proc->next = sleep_queue_head;
     sleep_queue_head = proc;
 
-    /* switch to the next ready process immediately */
+    /* immediately switch to the next ready process */
     PCB_t *old_proc = proc;
     current_process = proc->sibling; 
     while (current_process->delay > 0) {
@@ -63,6 +68,18 @@ int sys_delay(PCB_t *proc, int ticks) {
     KernelContextSwitch(KCSwitchFunc, old_proc, current_process);
 
     return SUCCESS;
+}
+
+/* sys_exit: terminates a process and halts if it is init */
+void sys_exit(PCB_t *proc, int status) {
+    TracePrintf(0, "process %d exiting with status %d\n", proc->pid, status);
+    /* the init death rule: halt if the initial process exits */
+    if (proc->pid == 1) {
+        TracePrintf(0, "init process exited: halting system\n");
+        Halt();
+    }
+    /* for checkpoint 3 we simply halt since we don't have wait logic yet */
+    Halt();
 }
 
 /*
