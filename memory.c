@@ -82,3 +82,27 @@ void InitKernelMemoryMap(unsigned int pmem_size) {
         frames[i] = 1;
     }
 }
+
+int should_grows(void *addr) { /* check if fault is a valid stack growth request */
+    unsigned int f_addr = (unsigned int)addr;
+    unsigned int s_top = (unsigned int)DOWN_TO_PAGE(current_process->usr_ctx.sp);
+    /* fault must be in region 1, below current stack, and above heap break */
+    if (f_addr < s_top && f_addr >= VMEM_1_BASE && f_addr > (unsigned int)current_process->brk) {
+        if (f_addr <= (unsigned int)current_process->brk + PAGESIZE) return 0; /* red zone enforcement */
+        return 1;
+    }
+    return 0;
+}
+
+int grow_stack(void *addr) { /* allocate frames for stack expansion */
+    unsigned int f_pg = (unsigned int)DOWN_TO_PAGE(addr);
+    unsigned int s_pg = (unsigned int)DOWN_TO_PAGE(current_process->usr_ctx.sp);
+    /* allocate frames for every page between current bottom and the fault */
+    for (unsigned int p = s_pg - PAGESIZE; p >= f_pg; p -= PAGESIZE) {
+        int f = find_free(); if (f == ERROR) return ERROR; /* out of physical memory */
+        frames[f] = 1; int vpn = (p - VMEM_1_BASE) >> PAGESHIFT;
+        current_process->r1pt[vpn].valid = 1; current_process->r1pt[vpn].pfn = f;
+        current_process->r1pt[vpn].prot = PROT_READ | PROT_WRITE;
+    }
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1); return SUCCESS; /* flush stale mappings */
+}
