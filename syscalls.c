@@ -8,7 +8,7 @@
 #include <kern.h>
 
 /* sys_brk adjusts user heap with red zone and collision checks */
-int sys_brk(PCB_t *proc, void *addr) {
+int sys_brk(PCB_t *proc, void *addr){
     unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
     unsigned int cur_brk = (unsigned int)UP_TO_PAGE(proc->brk);
 
@@ -51,7 +51,7 @@ int sys_brk(PCB_t *proc, void *addr) {
 }
 
 /* sys_delay validates input and moves process to sleep queue */
-int sys_delay(PCB_t *proc, int ticks) {
+int sys_delay(PCB_t *proc, int ticks){
     if (ticks == 0) return SUCCESS;
     if (ticks < 0) return ERROR; /* time travel is not allowed */
 
@@ -71,76 +71,73 @@ int sys_delay(PCB_t *proc, int ticks) {
 }
 
 /* sys_exit terminates process and halts if is init */
-void sys_exit(PCB_t *proc, int status) {
-    TracePrintf(0, "process %d exiting with status %d\n", proc->pid, status);
-    /* the init death rule: halt if init exist */
-    if (proc->pid == 1) {
-        TracePrintf(0, "init process exited: halting system\n");
-        Halt();
+void sys_exit(int status){
+    if (current_process->pid == 1) Halt(); /* init death rule */
+
+    current_process->exit_status = status;
+    current_process->is_zombie = 1;
+
+    /* reparent children to init */
+    PCB_t *child = current_process->children;
+    while (child) {
+        child->parent = init_pcb;
+        child = child->sibling;
     }
-    Halt();
+    /*wake parent if they are waiting */
+    if (current_process->parent->state == STATE_WAITING) {
+        current_process->parent->state = STATE_READY;
+        enqueue(ready_queue, current_process->parent, sizeof(PCB_t *));
+    }
+    /* schedule someone else*/
+    schedule_next(); 
 }
 
 /* clones current process */
 int sys_fork(PCB_t *parent){
-    /*get new pcb and page table */
     PCB_t *child = (PCB_t *)malloc(sizeof(PCB_t));
     child->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
-    child->pid = helper_new_pid(child->r1pt); /* tell hardware helper */
+    child->pid = helper_new_pid(child->r1pt);
 
-    /* copy all region 1 pages */
-    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT)-1; /* temp window pg */
-    for(int i=0; i<MAX_PT_LEN; i++){
-        if(parent->r1pt[i].valid){
+    /* copy user memory via temp region 0 window */
+    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
+    for (int i = 0; i < MAX_PT_LEN; i++) {
+        if (parent->r1pt[i].valid) {
             int f = find_free();
             child->r1pt[i] = parent->r1pt[i];
             child->r1pt[i].pfn = f;
             
-            /* map frame to temp page so we can copy bytes into it */
             KernelPT[temp_vpn].pfn = f;
             KernelPT[temp_vpn].valid = 1;
             KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
             WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
             
-            /* copy data from parent addr to child's new frame */
             memcpy((void *)(temp_vpn << PAGESHIFT), (void *)(VMEM_1_BASE + (i * PAGESHIFT)), PAGESIZE);
         }
     }
-    KernelPT[temp_vpn].valid = 0; /* unmap window */
+    KernelPT[temp_vpn].valid = 0;
 
-    /* copy kernel stack and context */
+    /* allocate child kstack frames and clone */
+    for (int i = 0; i < 2; i++) child->kstack_pfn[i] = find_free();
     KernelContextSwitch(KCCopyFunc, child, NULL);
 
-    /* switch logic based on who returns */
-    if(current_process == child){
-        return 0; /* child returns 0 */
-    } else {
-        /* parent links child into tree and ready queue */
-        child->parent = parent;
-        child->sibling = parent->children;
-        parent->children = child;
-        /*put child in your ready list */
-        return child->pid; /*parent returns child pid*/
-    }
+    if (current_process == child) return 0;
+    
+    /* parent: link child and ready it */
+    child->parent = parent;
+    child->sibling = parent->children;
+    parent->children = child;
+    enqueue(ready_queue, child, sizeof(PCB_t *)); 
+    return child->pid;
 }
-
-int sys_exec(char *filename, char **argvec) {
-    /* check pointers aren't junk*/
+/*replace program image*/
+int sys_exec(char *filename, char **argvec){
+    /* check pointers before wipe */
     if (filename == NULL) return ERROR;
 
-    /* count and copy args to kernel heap so they don't get deleted */
-    /* argbuf = copy_to_kernel(argvec);  pseudocode for string copying */
-
-    /* this destroys old region 1 and loads new code */
-    if (LoadProgram(filename, argvec, current_process) == ERROR) {
-        /* free(argbuf); */
-        return ERROR;
-    }
-
-    /* free(argbuf); */
+    /* note: LoadProgram handles arg buffering and region 1 cleanup */
+    if (LoadProgram(filename, argvec, current_process) == ERROR) return ERROR;
     return SUCCESS; 
 }
-
 
 /*
 
