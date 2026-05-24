@@ -78,10 +78,11 @@ void sys_exit(PCB_t *proc, int status){
     /* reparent orphans to pid 1 (init) */
     PCB_t *kid = proc->child;
     while(kid != NULL){
+        PCB_t *next_orphan = kid->sibling; /* save next before re-linking */
         kid->parent = init_pcb;
-        kid->sibling = init_pcb->child; /* link kid into init_pcb's child list */
+        kid->sibling = init_pcb->child; /* move to init's list */
         init_pcb->child = kid;
-        kid = kid->sibling;
+        kid = next_orphan; /* move to saved next orphan */
     }
     proc->child = NULL;
     if (proc->parent->state == STATE_WAITING){ /* wake parent if they are blocked in wait() */
@@ -132,6 +133,14 @@ int sys_fork(PCB_t *parent){
 /*replace program image*/
 int sys_exec(char *filename, char **argvec){
     if(filename == NULL || !is_valid_ptr(filename)) return ERROR;
+	int count = 0, size = 0; /* count args and total string bytes */
+    while (argvec[count] != NULL) { size += strlen(argvec[count++]) + 1; }
+    char *k_buf = malloc(size); char **k_vec = malloc((count + 1) * sizeof(char *));
+    char *curr_k = k_buf;
+    for (int i = 0; i < count; i++) {
+        k_vec[i] = curr_k; strcpy(curr_k, argvec[i]); curr_k += strlen(argvec[i]) + 1;
+    }
+    k_vec[count] = NULL; argvec = k_vec;
     if(LoadProgram(filename, argvec, current_process) == ERROR){
         return ERROR;
     }
