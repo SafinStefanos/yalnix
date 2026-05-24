@@ -134,9 +134,48 @@ int sys_exec(char *filename, char **argvec){
     /* check pointers before wipe */
     if (filename == NULL) return ERROR;
 
-    /* note: LoadProgram handles arg buffering and region 1 cleanup */
+    /* LoadProgram handles arg buffering and region 1 cleanup */
     if (LoadProgram(filename, argvec, current_process) == ERROR) return ERROR;
     return SUCCESS; 
+}
+
+int sys_wait(int *status_ptr) {
+    /* error if no children exist at all */
+    if (current_process->child == NULL) return ERROR;
+
+    /* check status_ptr validity if provided */
+    if (status_ptr != NULL && !is_valid_ptr(status_ptr, PROT_WRITE)) return ERROR;
+
+    while (1) {
+        PCB_t *curr = current_process->child;
+        PCB_t *prev = NULL;
+
+        while (curr != NULL) {
+            if (curr->is_zombie) {
+                int pid = curr->pid;
+                if (status_ptr != NULL) *status_ptr = curr->exstat;
+
+                /* remove from parent's sibling list */
+                if (prev == NULL) current_process->child = curr->sibling;
+                else prev->sibling = curr->sibling;
+
+                /* clean up child pcb and notify hardware helper */
+                helper_retire_pid(pid); [6]
+                free_region1(curr->r1pt); [7]
+                free(curr->r1pt);
+                free(curr); 
+
+                return pid; /* return the pid of reaped child */
+            }
+            prev = curr;
+            curr = curr->sibling;
+        }
+
+        /*no zombies yet so block the parent and pick someone else*/
+        current_process->state = STATE_WAITING;
+        /*call your scheduler here */
+        schedule_next(); 
+    }
 }
 
 /*
