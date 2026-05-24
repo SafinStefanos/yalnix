@@ -167,7 +167,7 @@ int LoadProgram(char *name, char *args[], PCB_t* pcb){
     for(pg = text_pg1; pg < text_pg1 + (int)li.t_npg; pg++){
         pt[pg].prot = PROT_READ | PROT_EXEC;
     }
-    /* if any of these page table entries is also in the tlb you will need to flush the old mapping */
+    /* if any of these page table entries is also in the tlb, flush the old mapping */
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
     /* zero out the uninitialized data area */
