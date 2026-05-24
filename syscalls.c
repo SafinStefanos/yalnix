@@ -7,6 +7,64 @@
 #include <traps.h>
 #include <kern.h>
 
+
+ /* sys_brk: adjusts the user heap in region one */
+int sys_brk(PCB_t *proc, void *addr) {
+    unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
+    unsigned int cur_brk = (unsigned int)UP_TO_PAGE(proc->brk);
+
+    /* validate that the heap does not collide with the stack or go too low */
+    if ((unsigned int)addr < (unsigned int)proc->heap_base) return ERROR;
+    if (new_brk >= (unsigned int)proc->usr_ctx.sp) return ERROR;
+
+    int cur_vpn = (cur_brk - VMEM_1_BASE) >> PAGESHIFT;
+    int new_vpn = (new_brk - VMEM_1_BASE) >> PAGESHIFT;
+
+    if (new_vpn > cur_vpn) {
+        /* growing the heap by allocating new frames */
+        for (int i = cur_vpn; i < new_vpn; i++) {
+            int f = find_free();
+            if (f == ERROR) return ERROR;
+            frames[f] = 1;
+            proc->r1pt[i].valid = 1;
+            proc->r1pt[i].pfn = f;
+            proc->r1pt[i].prot = PROT_READ | PROT_WRITE;
+        }
+    } else if (new_vpn < cur_vpn) {
+        /* shrinking the heap by freeing frames */
+        for (int i = new_vpn; i < cur_vpn; i++) {
+            if (proc->r1pt[i].valid) {
+                frames[proc->r1pt[i].pfn] = 0;
+                proc->r1pt[i].valid = 0;
+            }
+        }
+    }
+
+    proc->brk = (void *)new_brk;
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+    return SUCCESS;
+}
+
+/* sys_delay: moves process to sleep queue and yields cpu */
+int sys_delay(PCB_t *proc, int ticks) {
+    if (ticks == 0) return SUCCESS;
+    if (ticks < 0) return ERROR;
+
+    proc->delay = ticks;
+    proc->next = sleep_queue_head;
+    sleep_queue_head = proc;
+
+    /* switch to the next ready process immediately */
+    PCB_t *old_proc = proc;
+    current_process = proc->sibling; 
+    while (current_process->delay > 0) {
+        current_process = current_process->sibling;
+    }
+    KernelContextSwitch(KCSwitchFunc, old_proc, current_process);
+
+    return SUCCESS;
+}
+
 /*
 
 Fork
