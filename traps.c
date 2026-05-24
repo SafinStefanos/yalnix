@@ -12,17 +12,17 @@ extern PCB_t* sleep_queue_head;
 void thandler(UserContext *usr_cont) {
     switch (usr_cont->vector) {
         case TRAP_CLOCK:
-            /* save the incoming user state into the pcb of the current process */
+            /*save the incoming user state into the pcb of the current process */
             memcpy(&current_process->usr_ctx, usr_cont, sizeof(UserContext));
 
-            /* iterate through the sleep queue to wake up ready processes */
+            /* iterate through sleep queue to wake up ready processes */
             PCB_t *curr_sleep = sleep_queue_head;
             PCB_t *prev_sleep = NULL;
-            while (curr_sleep != NULL) {
+            while (curr_sleep != NULL){
                 curr_sleep->delay--;
                 if (curr_sleep->delay <= 0) {
-                    /* remove from sleep list and mark as ready */
-                    if (prev_sleep == NULL) sleep_queue_head = curr_sleep->next;
+                    /*remove from sleep list and mark as ready */
+                    if(prev_sleep == NULL)sleep_queue_head = curr_sleep->next;
                     else prev_sleep->next = curr_sleep->next;
                     curr_sleep = curr_sleep->next;
                 } else {
@@ -31,25 +31,27 @@ void thandler(UserContext *usr_cont) {
                 }
             }
 
-            /* round robin: pick the next sibling that is not sleeping */
+            /* round robin picking next sibling that is runnable*/
             PCB_t *old_process = current_process;
             current_process = current_process->sibling;
-            while (current_process->delay > 0) {
+            /*skip processes that are sleeping or blocked in Wait() */
+            while (current_process->delay > 0 || current_process->state == STATE_WAITING) {
                 current_process = current_process->sibling;
             }
 
             /* perform the kernel stack and context switch */
             KernelContextSwitch(KCSwitchFunc, old_process, current_process);
 
-            /*hardware remap of region one and tlb flush */
+            /* hardware remap of region one and tlb flush */
             WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
-            /*restore hardware state for return to user mode */
+            /* restore hardware state for return to user mode */
             memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
 
         case TRAP_KERNEL:
+            /*syscall return values must be placed in regs*/
             switch (usr_cont->code) {
                 case YALNIX_GETPID:
                     usr_cont->regs = current_process->pid;
@@ -60,6 +62,19 @@ void thandler(UserContext *usr_cont) {
                 case YALNIX_DELAY:
                     usr_cont->regs = sys_delay(current_process, (int)usr_cont->regs);
                     break;
+                /* for the fork, exec, etc. syscalls */
+                case YALNIX_FORK:
+                    usr_cont->regs = sys_fork(current_process);
+                    break;
+                case YALNIX_EXEC:
+                    usr_cont->regs = sys_exec((char *)usr_cont->regs, (char **)usr_cont->regs[7]);
+                    break;
+                case YALNIX_WAIT:
+                    usr_cont->regs = sys_wait((int *)usr_cont->regs);
+                    break;
+                case YALNIX_EXIT:
+                    sys_exit(current_process, (int)usr_cont->regs);
+                    break;
                 default:
                     usr_cont->regs = ERROR;
                     break;
@@ -67,17 +82,30 @@ void thandler(UserContext *usr_cont) {
             break;
 
         case TRAP_MEMORY:
-            /* check for the init death rule*/
+            /*check for stack growth */
+            if (should_grow_stack(usr_cont->addr)) {
+                if (grow_stack(usr_cont->addr) == SUCCESS) return;
+            }
+
+            /* if PID 1 fails, halt the whole system*/
             if (current_process->pid == 1) {
                 TracePrintf(0, "init process aborted due to memory fault\n");
                 Halt();
             }
-            /*for now halt if process hits memory fault */
-            Halt();
+            /*abort failing process but continue others */
+            TracePrintf(0, "Process %d aborted: memory fault at %p\n", current_process->pid, usr_cont->addr);
+            sys_exit(current_process, ERROR); 
+            break;
+
+        case TRAP_MATH:
+        case TRAP_ILLEGAL:
+            /*abort process for math or illegal instructions */
+            if (current_process->pid == 1) Halt();
+            TracePrintf(0, "Process %d aborted due to trap %d\n", current_process->pid, usr_cont->vector);
+            sys_exit(current_process, ERROR);
             break;
 
         default: 
-            /* halt on math or illegal instruction traps for now */
             Halt();
             break;
     }
