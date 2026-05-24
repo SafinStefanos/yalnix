@@ -124,6 +124,23 @@ int sys_fork(PCB_t *parent){
     }
 }
 
+int sys_exec(char *filename, char **argvec) {
+    /* check pointers aren't junk*/
+    if (filename == NULL) return ERROR;
+
+    /* count and copy args to kernel heap so they don't get deleted */
+    /* argbuf = copy_to_kernel(argvec);  pseudocode for string copying */
+
+    /* this destroys old region 1 and loads new code */
+    if (LoadProgram(filename, argvec, current_process) == ERROR) {
+        /* free(argbuf); */
+        return ERROR;
+    }
+
+    /* free(argbuf); */
+    return SUCCESS; 
+}
+
 
 /*
 
