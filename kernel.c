@@ -97,7 +97,8 @@ KernelContext *KCSInitFunc(KernelContext *kc_in, void *pcb_v, void *unused) {
     pcb->krn_ctx = *kc_in;
     return kc_in;
 }
-KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v) {
+
+KernelContext *KCCopyFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v) {
     PCB_t *curr = (PCB_t *)curr_pcb_v;
     PCB_t *next = (PCB_t *)next_pcb_v;
 
@@ -162,6 +163,39 @@ KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_p
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
     return &next->krn_ctx;
+}
+
+KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v) {
+    PCB_t *curr = (PCB_t *)curr_pcb_v;
+    PCB_t *next = (PCB_t *)next_pcb_v;
+
+    TracePrintf(0, "next: pid=%d init=%d r1pt=%p kstack_pfn=[%d,%d,%d,%d] sibling=%p parent=%p child=%p state=%d\n",
+                next->pid, next->init, next->r1pt, next->kstack_pfn, next->kstack_pfn[5], next->kstack_pfn[6], next->kstack_pfn[7], next->sibling, next->parent, next->child, next->state);
+    TracePrintf(0, "KCSWitchFunc: curr=%p next=%p\n", curr, next);
+
+    if (curr == NULL || next == NULL) {
+        TracePrintf(0, "KCSSwitchFunc: NULL pcb!\n");
+        return NULL;
+    }
+
+    curr->krn_ctx = *kc_in; /*save current kc*/
+
+    WriteRegister(REG_PTBR1, (unsigned int)next->r1pt); /*switching region 1 pt*/
+    WriteRegister(REG_PTLR1, MAX_PT_LEN);
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+
+    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT; /*swapping kernel stack frames*/
+    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
+
+    for (int i = 0; i < ks_npg; i++) { /*change pagetable before flush*/
+        KernelPT[ks_base_pg + i].pfn = next->kstack_pfn[i];
+        KernelPT[ks_base_pg + i].valid = 1;
+        KernelPT[ks_base_pg + i].prot = PROT_READ | PROT_WRITE;
+    }
+
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK); /* tlb flush for kernel stack*/
+
+    return &next->krn_ctx; /*return kernel context*/
 }
 
 
