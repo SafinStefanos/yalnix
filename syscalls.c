@@ -81,6 +81,50 @@ void sys_exit(PCB_t *proc, int status) {
     Halt();
 }
 
+/* clones current process */
+int sys_fork(PCB_t *parent){
+    /*get new pcb and page table */
+    PCB_t *child = (PCB_t *)malloc(sizeof(PCB_t));
+    child->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
+    child->pid = helper_new_pid(child->r1pt); /* tell hardware helper */
+
+    /* copy all region 1 pages */
+    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT)-1; /* temp window pg */
+    for(int i=0; i<MAX_PT_LEN; i++){
+        if(parent->r1pt[i].valid){
+            int f = find_free();
+            child->r1pt[i] = parent->r1pt[i];
+            child->r1pt[i].pfn = f;
+            
+            /* map frame to temp page so we can copy bytes into it */
+            KernelPT[temp_vpn].pfn = f;
+            KernelPT[temp_vpn].valid = 1;
+            KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
+            WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
+            
+            /* copy data from parent addr to child's new frame */
+            memcpy((void *)(temp_vpn << PAGESHIFT), (void *)(VMEM_1_BASE + (i * PAGESHIFT)), PAGESIZE);
+        }
+    }
+    KernelPT[temp_vpn].valid = 0; /* unmap window */
+
+    /* copy kernel stack and context */
+    KernelContextSwitch(KCCopyFunc, child, NULL);
+
+    /* switch logic based on who returns */
+    if(current_process == child){
+        return 0; /* child returns 0 */
+    } else {
+        /* parent links child into tree and ready queue */
+        child->parent = parent;
+        child->sibling = parent->children;
+        parent->children = child;
+        /*put child in your ready list */
+        return child->pid; /*parent returns child pid*/
+    }
+}
+
+
 /*
 
 Fork
