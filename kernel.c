@@ -241,113 +241,101 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     }
 
     // Initialize Interrupt Vector Table
-    for (i = 0; i < TRAP_VECTOR_SIZE; i++) {
+   for (i = 0; i < TRAP_VECTOR_SIZE; i++) {
         IVT[i] = &thandler;  // generic handler for unimplemented traps
     }
-    WriteRegister(REG_VECTOR_BASE, (unsigned int)&IVT[0]);
+    WriteRegister(REG_VECTOR_BASE, (unsigned int)&IVT);
 
     curr_kbrk = (void *)UP_TO_PAGE(sbrk(0));
 
-
-
-    // ---- Create init PCB ----
+    // ---- Create init PCB ---- [6, 7]
     init_pcb = (PCB_t *)malloc(sizeof(PCB_t));
-	memset(init_pcb, 0, sizeof(PCB_t));
+    memset(init_pcb, 0, sizeof(PCB_t));
     init_pcb->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
     for (i = 0; i < MAX_PT_LEN; i++) init_pcb->r1pt[i].valid = 0;
     init_pcb->pid = helper_new_pid(init_pcb->r1pt);
 
-	
-    // ---- Create idle PCB ----
+    // ---- Create idle PCB ---- [8]
     idle_pcb = (PCB_t *)malloc(sizeof(PCB_t));
-	memset(idle_pcb, 0, sizeof(PCB_t));
-	TracePrintf(0, "idle_pcb after memset: pid=%d init=%d kstack_pfn=[%d,%d] sibling=%p parent=%p state=%d\n",
-    idle_pcb->pid, idle_pcb->init,
-    idle_pcb->kstack_pfn[0], idle_pcb->kstack_pfn[1],
-    idle_pcb->sibling, idle_pcb->parent, idle_pcb->state);
-	
+    memset(idle_pcb, 0, sizeof(PCB_t));
+    // Diagnostic traceprint as per your snippet
+    TracePrintf(0, "idle_pcb after memset: pid=%d init=%d kstack_pfn=[%d,%d] sibling=%p parent=%p state=%d\n",
+                idle_pcb->pid, idle_pcb->init,
+                idle_pcb->kstack_pfn, idle_pcb->kstack_pfn[9],
+                idle_pcb->sibling, idle_pcb->parent, idle_pcb->state);
 
     idle_pcb->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
     for (i = 0; i < MAX_PT_LEN; i++) idle_pcb->r1pt[i].valid = 0;
     idle_pcb->pid = helper_new_pid(idle_pcb->r1pt);
 
-    // Allocate idle's kernel stack frames (separate from init's)
+    // CORRECTED KERNEL STACK ASSIGNMENT: [1, 2, 7]
+    // The current process (Idle) keeps the frames it is currently running on (0x7e, 0x7f)
     for (i = 0; i < ks_npg; i++) {
-        int f = find_free();
-        frames[f] = 1;
-        idle_pcb->kstack_pfn[i] = f;
+        idle_pcb->kstack_pfn[i] = kstack_pfns[i];
     }
 
-    // Allocate one user stack page for idle in region 1
+    // Allocate NEW frames for the process we are about to clone (Init)
+    for (i = 0; i < ks_npg; i++) {
+        int f = find_free();
+        if (f == ERROR) {
+            TracePrintf(0, "Critical Error: Could not allocate frames for Init stack\n");
+            Halt();
+        }
+        frames[f] = 1;
+        init_pcb->kstack_pfn[i] = f;
+    }
+
+    // Allocate one user stack page for idle in region 1 [10-12]
     int svpn = MAX_PT_LEN - 1;
     int fus = find_free();
+    if (fus == ERROR) Halt();
     frames[fus] = 1;
     idle_pcb->r1pt[svpn].valid = 1;
     idle_pcb->r1pt[svpn].pfn = fus;
     idle_pcb->r1pt[svpn].prot = PROT_READ | PROT_WRITE;
 
-    // Init shares the current kernel stack (0x7e, 0x7f)
-    for (i = 0; i < ks_npg; i++) {
-        init_pcb->kstack_pfn[i] = kstack_pfns[i];
-    }
-
-    // Enable VM before LoadProgram
+    // 1. Finalize the Page Tables and Enable VM [13, 14]
     WriteRegister(REG_PTBR0, (unsigned int)KernelPT);
     WriteRegister(REG_PTLR0, MAX_PT_LEN);
-    WriteRegister(REG_PTBR1, (unsigned int)init_pcb->r1pt);
+    // Initially map Region 1 to Idle's page table [10, 12]
+    WriteRegister(REG_PTBR1, (unsigned int)idle_pcb->r1pt); 
     WriteRegister(REG_PTLR1, MAX_PT_LEN);
     WriteRegister(REG_VM_ENABLE, 1);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_ALL);
 
-    // Load init program
-	
-    // Use cmd_args[0] as init program name, or default to "init"
-    char *init_name = "init";
-    if (argv != NULL && argv[0] != NULL) {
-        init_name = argv[0];
+    // 2. Officially identify ourselves as the "Idle" process [8, 15]
+    current_process = idle_pcb; 
+
+    // 3. Clone the current state to create the "Init" process [7, 16, 17]
+    // Both processes will eventually "wake up" right after this call.
+    KernelContextSwitch(KCCopyFunc, init_pcb, NULL);
+
+    // 4. Split Logic: Are we the parent (Idle) or the child (Init)? [7]
+    if (current_process == init_pcb) {
+        // I am the Init process: Overwrite my Region 1 with the real program [15, 18, 19]
+        char *init_name = (argv && argv) ? argv : "init";
+        TracePrintf(1, "Init process starting: loading %s\n", init_name);
+        if (LoadProgram(init_name, argv, init_pcb) != SUCCESS) {
+            TracePrintf(0, "Init Load Failed\n");
+            Halt();
+        }
+        // LoadProgram has already set init_pcb->usr_ctx (PC and SP) [18]
+    } else {
+        // I am the Idle process: Set up the shortcut to run DoIdle [11, 12]
+        idle_pcb->usr_ctx = *ctx; // Use default context as template
+        idle_pcb->usr_ctx.pc = (void *)DoIdle; // Jump to your idle loop
+        idle_pcb->usr_ctx.sp = (void *)(VMEM_1_LIMIT - 4); // Set stack pointer
+        
+        // Establish sibling pointers for your Round-Robin scheduler [20-22]
+        idle_pcb->sibling = init_pcb;
+        init_pcb->sibling = idle_pcb;
     }
 
-    int init_check = LoadProgram(init_name, argv, init_pcb);
-    if (init_check != SUCCESS) {
-        TracePrintf(0, "KernelStart: LoadProgram failed\n");
-        Halt();
-    }
-	WriteRegister(REG_PTBR1, (unsigned int)idle_pcb->r1pt);
-    WriteRegister(REG_PTLR1, MAX_PT_LEN);
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
-	char* idle_name = "idle";
-
-
-    int idle_check = LoadProgram(idle_name, NULL, idle_pcb);
-    if (idle_check != SUCCESS) {
-        TracePrintf(0, "KernelStart: LoadProgram idle failed\n");
-        Halt();
-    }
-
-	idle_pcb->sibling = init_pcb;
-	init_pcb->sibling = idle_pcb;
-    // Switch back to init's page table
-    WriteRegister(REG_PTBR1, (unsigned int)init_pcb->r1pt);
-    WriteRegister(REG_PTLR1, MAX_PT_LEN);
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
-    // Set up process globals
-    current_process = init_pcb;
-    ready_queue_head = init_pcb;
-    sleep_queue_head = NULL;
-
-    // Save initial kernel contexts before first clock tick
-    KernelContextSwitch(KCSInitFunc, init_pcb, NULL);
-
-    // Make sure hardware is using init's page table
-    WriteRegister(REG_PTBR1, (unsigned int)init_pcb->r1pt);
-    WriteRegister(REG_PTLR1, MAX_PT_LEN);
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
-
-    // Return to usermode running init
-    *ctx = init_pcb->usr_ctx;
-
-    TracePrintf(0, "KernelStart done. Idle & Init ready.\n");
-}
+    // 5. Final Handoff to user mode [11, 23, 24]
+    // Hardware restores whichever process is currently pointed to by 'current_process'
+    *ctx = current_process->usr_ctx;
+    TracePrintf(0, "Leaving KernelStart, entering user mode as PID %d\n", current_process->pid);
+} 
 
 int SetKernelBrk(void *addr) {
     unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
