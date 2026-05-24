@@ -7,7 +7,7 @@
 #include <traps.h>
 #include <kern.h>
 
-/* sys_brk: adjusts user heap with red zone and collision checks */
+/* sys_brk adjusts user heap with red zone and collision checks */
 int sys_brk(PCB_t *proc, void *addr) {
     unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
     unsigned int cur_brk = (unsigned int)UP_TO_PAGE(proc->brk);
@@ -15,7 +15,7 @@ int sys_brk(PCB_t *proc, void *addr) {
     /* ensure the heap does not go below the original data segment */
     if ((unsigned int)addr < (unsigned int)proc->heap_base) return ERROR;
 
-    /* enforce red zone: leave at least one unmapped page below the stack */
+    /* leave at least one unmapped page below the stack */
     unsigned int stack_limit = (unsigned int)DOWN_TO_PAGE(proc->usr_ctx.sp);
     if (new_brk >= stack_limit - PAGESIZE) {
         TracePrintf(0, "sys_brk: collision with stack red zone\n");
@@ -36,7 +36,7 @@ int sys_brk(PCB_t *proc, void *addr) {
             proc->r1pt[i].prot = PROT_READ | PROT_WRITE;
         }
     } else if (new_vpn < cur_vpn) {
-        /* shrinking the heap: free existing frames */
+        /* shrinking the heap so free existing frames */
         for (int i = new_vpn; i < cur_vpn; i++) {
             if (proc->r1pt[i].valid) {
                 frames[proc->r1pt[i].pfn] = 0;
@@ -50,7 +50,7 @@ int sys_brk(PCB_t *proc, void *addr) {
     return SUCCESS;
 }
 
-/* sys_delay: validates input and moves process to sleep queue */
+/* sys_delay validates input and moves process to sleep queue */
 int sys_delay(PCB_t *proc, int ticks) {
     if (ticks == 0) return SUCCESS;
     if (ticks < 0) return ERROR; /* time travel is not allowed */
@@ -70,15 +70,14 @@ int sys_delay(PCB_t *proc, int ticks) {
     return SUCCESS;
 }
 
-/* sys_exit: terminates a process and halts if it is init */
+/* sys_exit terminates process and halts if is init */
 void sys_exit(PCB_t *proc, int status) {
     TracePrintf(0, "process %d exiting with status %d\n", proc->pid, status);
-    /* the init death rule: halt if the initial process exits */
+    /* the init death rule: halt if init exist */
     if (proc->pid == 1) {
         TracePrintf(0, "init process exited: halting system\n");
         Halt();
     }
-    /* for checkpoint 3 we simply halt since we don't have wait logic yet */
     Halt();
 }
 
