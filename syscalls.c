@@ -13,11 +13,11 @@ int sys_brk(PCB_t *proc, void *addr){
     unsigned int cur_brk = (unsigned int)UP_TO_PAGE(proc->brk);
 
     /* ensure the heap does not go below the original data segment */
-    if ((unsigned int)addr < (unsigned int)proc->heap_base) return ERROR;
+    if((unsigned int)addr < (unsigned int)proc->heap_base)return ERROR;
 
     /* leave at least one unmapped page below the stack */
     unsigned int stack_limit = (unsigned int)DOWN_TO_PAGE(proc->usr_ctx.sp);
-    if (new_brk >= stack_limit - PAGESIZE) {
+    if(new_brk >= stack_limit - PAGESIZE){
         TracePrintf(0, "sys_brk: collision with stack red zone\n");
         return ERROR;
     }
@@ -25,9 +25,9 @@ int sys_brk(PCB_t *proc, void *addr){
     int cur_vpn = (cur_brk - VMEM_1_BASE) >> PAGESHIFT;
     int new_vpn = (new_brk - VMEM_1_BASE) >> PAGESHIFT;
 
-    if (new_vpn > cur_vpn) {
+    if(new_vpn > cur_vpn){
         /* growing the heap: allocate new frames */
-        for (int i = cur_vpn; i < new_vpn; i++) {
+        for(int i = cur_vpn; i < new_vpn; i++){
             int f = find_free();
             if (f == ERROR) return ERROR;
             frames[f] = 1;
@@ -35,10 +35,10 @@ int sys_brk(PCB_t *proc, void *addr){
             proc->r1pt[i].pfn = f;
             proc->r1pt[i].prot = PROT_READ | PROT_WRITE;
         }
-    } else if (new_vpn < cur_vpn) {
+    }else if(new_vpn < cur_vpn){
         /* shrinking the heap so free existing frames */
-        for (int i = new_vpn; i < cur_vpn; i++) {
-            if (proc->r1pt[i].valid) {
+        for(int i = new_vpn; i < cur_vpn; i++){
+            if (proc->r1pt[i].valid){
                 frames[proc->r1pt[i].pfn] = 0;
                 proc->r1pt[i].valid = 0;
             }
@@ -52,8 +52,8 @@ int sys_brk(PCB_t *proc, void *addr){
 
 /* sys_delay validates input and moves process to sleep queue */
 int sys_delay(PCB_t *proc, int ticks){
-    if (ticks == 0) return SUCCESS;
-    if (ticks < 0) return ERROR; /* time travel is not allowed */
+    if (ticks == 0)return SUCCESS;
+    if (ticks < 0)return ERROR; /* time travel is not allowed */
 
     proc->delay = ticks;
     proc->next = sleep_queue_head;
@@ -62,35 +62,35 @@ int sys_delay(PCB_t *proc, int ticks){
     /* immediately switch to the next ready process */
     PCB_t *old_proc = proc;
     current_process = proc->sibling; 
-    while (current_process->delay > 0) {
+    while(current_process->delay > 0){
         current_process = current_process->sibling;
     }
     KernelContextSwitch(KCSwitchFunc, old_proc, current_process);
-
     return SUCCESS;
 }
 
 /* sys_exit terminates process and halts if is init */
-void sys_exit(int status){
-    if (current_process->pid == 1) Halt(); /* init death rule */
-
-    current_process->exit_status = status;
-    current_process->is_zombie = 1;
-
-    /* reparent children to init */
-    PCB_t *child = current_process->children;
-    while (child) {
-        child->parent = init_pcb;
-        child = child->sibling;
+void sys_exit(PCB_t *proc, int status){
+    if (proc->pid == 1) Halt(); /* init cannot die */
+    proc->exstat = status;
+    proc->is_z = 1; /* mark as zombie for wait() */
+    proc->state = STATE_ZOMBIE;
+    /* reparent orphans to pid 1 (init) */
+    PCB_t *kid = proc->child;
+    while(kid != NULL){
+        kid->parent = init_pcb;
+        kid->sibling = init_pcb->child; /* link kid into init_pcb's child list */
+        init_pcb->child = kid;
+        kid = kid->sibling;
     }
-    /*wake parent if they are waiting */
-    if (current_process->parent->state == STATE_WAITING) {
-        current_process->parent->state = STATE_READY;
-        enqueue(ready_queue, current_process->parent, sizeof(PCB_t *));
+    proc->child = NULL;
+    if (proc->parent->state == STATE_WAITING){ /* wake parent if they are blocked in wait() */
+        proc->parent->state = STATE_READY;
+        enqueue(ready_queue, proc->parent, sizeof(PCB_t *));
     }
-    /* schedule someone else*/
-    schedule_next(); 
+    schedule_next(); /* pick next process to run */
 }
+
 
 /* clones current process */
 int sys_fork(PCB_t *parent){
@@ -99,8 +99,8 @@ int sys_fork(PCB_t *parent){
     child->pid = helper_new_pid(child->r1pt);
 
     /* copy user memory via temp region 0 window */
-    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
-    for (int i = 0; i < MAX_PT_LEN; i++) {
+    int temp_vpn=(KERNEL_STACK_BASE >> PAGESHIFT) - 1;
+    for(int i = 0; i < MAX_PT_LEN; i++){
         if (parent->r1pt[i].valid) {
             int f = find_free();
             child->r1pt[i] = parent->r1pt[i];
@@ -114,10 +114,10 @@ int sys_fork(PCB_t *parent){
             memcpy((void *)(temp_vpn << PAGESHIFT), (void *)(VMEM_1_BASE + (i * PAGESHIFT)), PAGESIZE);
         }
     }
-    KernelPT[temp_vpn].valid = 0;
+    KernelPT[temp_vpn].valid=0;
 
     /* allocate child kstack frames and clone */
-    for (int i = 0; i < 2; i++) child->kstack_pfn[i] = find_free();
+    for(int i=0; i<2; i++)child->kstack_pfn[i] = find_free();
     KernelContextSwitch(KCCopyFunc, child, NULL);
 
     if (current_process == child) return 0;
@@ -131,75 +131,65 @@ int sys_fork(PCB_t *parent){
 }
 /*replace program image*/
 int sys_exec(char *filename, char **argvec){
-    /* check pointers before wipe */
-    if (filename == NULL) return ERROR;
-
-    /* LoadProgram handles arg buffering and region 1 cleanup */
-    if (LoadProgram(filename, argvec, current_process) == ERROR) return ERROR;
+    if(filename == NULL || !is_valid_ptr(filename)) return ERROR;
+    if(LoadProgram(filename, argvec, current_process) == ERROR){
+        return ERROR;
+    }
     return SUCCESS; 
 }
 
-int sys_wait(int *status_ptr) {
-    /* error if no children exist at all */
-    if (current_process->child == NULL) return ERROR;
+int sys_wait(int *status_ptr){
+    if(current_process->child == NULL)return ERROR; /* error if no kids */
 
-    /* check status_ptr validity if provided */
-    if (status_ptr != NULL && !is_valid_ptr(status_ptr, PROT_WRITE)) return ERROR;
+    if(status_ptr != NULL && !is_valid_ptr(status_ptr))return ERROR; /* check if status_ptr is valid*/
 
-    while (1) {
+    while(1){
         PCB_t *curr = current_process->child;
         PCB_t *prev = NULL;
-
-        while (curr != NULL) {
-            if (curr->is_zombie) {
+        while(curr != NULL){
+            if (curr->is_z){ /* found a zombie child */
                 int pid = curr->pid;
-                if (status_ptr != NULL) *status_ptr = curr->exstat;
-
-                /* remove from parent's sibling list */
-                if (prev == NULL) current_process->child = curr->sibling;
+                if(status_ptr != NULL) *status_ptr = curr->exstat;
+                if(prev == NULL)current_process->child = curr->sibling; /* remove dead child */
                 else prev->sibling = curr->sibling;
 
-                /* clean up child pcb and notify hardware helper */
-                helper_retire_pid(pid); 
+                helper_retire_pid(pid); /* hardware and memory cleanup */
                 free_region1(curr->r1pt);
                 free(curr->r1pt);
                 free(curr); 
 
-                return pid; /* return the pid of reaped child */
+                return pid;
             }
             prev = curr;
             curr = curr->sibling;
         }
-
-        /*no zombies yet so block the parent and pick someone else*/
-        current_process->state = STATE_WAITING;
-        /*call your scheduler here */
+        current_process->state = STATE_WAITING; /*parent waits and yields cpu */
         schedule_next(); 
     }
 }
 
 /*check if memory fault is valid stack growth request */
-int should_grows(void *addr) {
+int should_grows(void *addr){
     unsigned int fault_addr = (unsigned int)addr;
     unsigned int stack_top = (unsigned int)DOWN_TO_PAGE(current_process->usr_ctx.sp);
     
     /* fault must be in region 1, below current stack, and above heap break */
-    if (fault_addr < stack_top && fault_addr >= VMEM_1_BASE && fault_addr > (unsigned int)current_process->brk) {
+    if(fault_addr < stack_top && fault_addr >= VMEM_1_BASE && fault_addr > (unsigned int)current_process->brk){
         /* enforce 1-page red zone: cannot grow into the page right above the heap */
-        if (fault_addr <= (unsigned int)current_process->brk + PAGESIZE) return 0;
+        if(fault_addr <= (unsigned int)current_process->brk + PAGESIZE) return 0;
         return 1;
     }
     return 0;
 }
 
-int grow_stack(void *addr) {
+int grow_stack(void *addr){
     unsigned int fault_addr = (unsigned int)DOWN_TO_PAGE(addr);
     unsigned int current_stack_bottom = (unsigned int)DOWN_TO_PAGE(current_process->usr_ctx.sp);
 
     /* allocate frames for every page between current bottom and fault*/
-    for (unsigned int p = current_stack_bottom - PAGESIZE; p >= fault_addr; p -= PAGESIZE) {
+    for(unsigned int p = current_stack_bottom - PAGESIZE; p >= fault_addr; p -= PAGESIZE){
         int f = find_free(); 
-        if (f == ERROR) return ERROR;
+        if (f==ERROR) return ERROR;
         
         frames[f] = 1; 
         int vpn = (p - VMEM_1_BASE) >> PAGESHIFT;
@@ -207,7 +197,6 @@ int grow_stack(void *addr) {
         current_process->r1pt[vpn].pfn = f;
         current_process->r1pt[vpn].prot = PROT_READ | PROT_WRITE;
     }
-
     /* hardware sees new mappings */
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
     return SUCCESS;
@@ -215,11 +204,11 @@ int grow_stack(void *addr) {
 
 int is_valid_ptr(void *ptr, int required_prot) {
     unsigned int addr = (unsigned int)ptr;
-    if (addr < VMEM_1_BASE || addr >= VMEM_1_LIMIT) return 0;
+    if (addr < VMEM_1_BASE || addr >= VMEM_1_LIMIT)return 0;
     int vpn = (addr - VMEM_1_BASE) >> PAGESHIFT;
     pte_t *pte = &current_process->r1pt[vpn];
     if (!pte->valid) return 0;
-    if ((pte->prot & required_prot) != required_prot) return 0;
+    if ((pte->prot & required_prot) != required_prot)return 0;
     return 1;
 }
 
