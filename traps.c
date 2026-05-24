@@ -8,50 +8,53 @@
 
 extern PCB_t* current_process;
 
+/* thandler: Integrated trap handler for Checkpoint 3 */
 void thandler(UserContext *usr_cont) {
     switch (usr_cont->vector) {
         case TRAP_CLOCK:
             TracePrintf(1, "TRAP_CLOCK: PID %d\n", current_process->pid);
 
-            /* save hardware state of the current process into its pcb*/
-            current_process->usr_ctx = *usr_cont;
+            /*current state saved to PCB*/
+            memcpy(&current_process->usr_ctx, usr_cont, sizeof(UserContext));
 
-            /* pick next*/
+            /*round robin*/
             PCB_t *old_process = current_process;
             current_process = current_process->sibling;
 
-      		/*kernel stack and context switch*/
-           /* returns only when the scheduler eventually picks 'old_process' again*/
+            /*stack swap*/
             if (KernelContextSwitch(KCSwitchFunc, old_process, current_process) == -1) {
                 TracePrintf(0, "trap_clock: KernelContextSwitch failed\n");
                 Halt();
             }
 
-            /*remap region 1 to new pt*/
+            /*tell process new r1*/
             WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
+            /*TLB flush of region 1*/
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
-            //restote hardware
-            *usr_cont = current_process->usr_ctx;
+            /*restore state for trap return*/
+            memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
 
         case TRAP_KERNEL:
             TracePrintf(1, "TRAP_KERNEL: syscall code 0x%x\n", usr_cont->code);
             
-            /*Syscall Dispatcher*/
             switch (usr_cont->code) {
                 case YALNIX_GETPID:
-                    /*PID returned in regs */
-                    usr_cont->regs = sys_getpid(current_process);
+                    /*current pid --> regs*/
+                    usr_cont->regs = current_process->pid;
                     break;
+
                 case YALNIX_BRK:
-                    /*Call brk*/
+                    /*brk*/
                     usr_cont->regs = sys_brk(current_process, (void *)usr_cont->regs);
                     break;
+
                 case YALNIX_DELAY:
-                    /*call delay*/
+                    /*delay stuff*/
                     usr_cont->regs = sys_delay(current_process, (int)usr_cont->regs);
                     break;
+
                 default:
                     TracePrintf(1, "Unhandled Syscall 0x%x\n", usr_cont->code);
                     usr_cont->regs = ERROR;
@@ -60,21 +63,20 @@ void thandler(UserContext *usr_cont) {
             break;
 
         case TRAP_MEMORY:
-            /* abort the process on illegal memory access */
-            /*stack logic*/
+            /*abort on bad mem access*/
             TracePrintf(0, "TRAP_MEMORY: Fault at addr %p, PID %d aborted\n", 
                         usr_cont->addr, current_process->pid);
-            Halt(); /*halt on errors*/
+            Halt(); /*halt*/
             break;
 
         default: 
-            /* Handle TRAP_ILLEGAL, TRAP_MATH, etc*/
-            TracePrintf(0, "Unhandled trap: %d at PC %p, PID %d aborted\n", 
+            /* TRAP_ILLEGAL, TRAP_MATH, etc*/
+            TracePrintf(0, "Unhandled trap %d at PC %p, PID %d aborted\n", 
                         usr_cont->vector, usr_cont->pc, current_process->pid);
             Halt();
             break;
     }
-}
+} 
 /*
 	if(usr_cont==TRAP_KERNEL)
 		Long conditional statement to figure out which syscall happened
