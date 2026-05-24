@@ -126,7 +126,7 @@ KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused) {
     return kc_in; /* parent returns immediately from the switch */
 }
 
-    // Normal case: swap kernel stack frames
+    /*swap kernel stack frames*/
     int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
     int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
     for (int i = 0; i < ks_npg; i++) {
@@ -194,7 +194,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         KernelPT[i].prot = PROT_READ | PROT_EXEC;
     }
 
-    // Map kernel data/heap pages
+    // map kernel data/heap pages
     for (i = _first_kernel_data_page; i < _orig_kernel_brk_page; i++) {
         KernelPT[i].valid = 1;
         KernelPT[i].pfn = i;
@@ -240,7 +240,6 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     for (i = 0; i < MAX_PT_LEN; i++) idle_pcb->r1pt[i].valid = 0;
     idle_pcb->pid = helper_new_pid(idle_pcb->r1pt);
 
-    // CORRECTED KERNEL STACK ASSIGNMENT: [1, 2, 7]
     // The current process (Idle) keeps the frames it is currently running on (0x7e, 0x7f)
     for (i = 0; i < ks_npg; i++) {
         idle_pcb->kstack_pfn[i] = kstack_pfns[i];
@@ -275,36 +274,35 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     WriteRegister(REG_VM_ENABLE, 1);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_ALL);
 
-    // 2. Officially identify ourselves as the "Idle" process [8, 15]
+    /*Officially identify ourselves as the "Idle" process*/
     current_process = idle_pcb; 
 
-    // 3. Clone the current state to create the "Init" process [7, 16, 17]
-    // Both processes will eventually "wake up" right after this call.
+    /* 3. Clone the current state to create the "Init" process */
+    /* Both processes will eventually "wake up" right after this call.*/
     KernelContextSwitch(KCCopyFunc, init_pcb, NULL);
 
-    // 4. Split Logic: Are we the parent (Idle) or the child (Init)? [7]
+    /* for the split, are we the parent (Idle) or the child (Init)?*/
     if (current_process == init_pcb) {
-        // I am the Init process: Overwrite my Region 1 with the real program [15, 18, 19]
+        /* I am the Init process: Overwrite my Region 1 with the real program*/
         char *init_name = (argv && argv) ? argv : "init";
         TracePrintf(1, "Init process starting: loading %s\n", init_name);
         if (LoadProgram(init_name, argv, init_pcb) != SUCCESS) {
             TracePrintf(0, "Init Load Failed\n");
             Halt();
         }
-        // LoadProgram has already set init_pcb->usr_ctx (PC and SP) [18]
+        /* LoadProgram has already set init_pcb->usr_ctx*/
     } else {
-        // I am the Idle process: Set up the shortcut to run DoIdle [11, 12]
-        idle_pcb->usr_ctx = *ctx; // Use default context as template
-        idle_pcb->usr_ctx.pc = (void *)DoIdle; // Jump to your idle loop
-        idle_pcb->usr_ctx.sp = (void *)(VMEM_1_LIMIT - 4); // Set stack pointer
+        /* Set up the shortcut to run DoIdle */
+        idle_pcb->usr_ctx = *ctx; /*Use default context as template*/
+        idle_pcb->usr_ctx.pc = (void *)DoIdle; /*Jump to your idle loop*/
+        idle_pcb->usr_ctx.sp = (void *)(VMEM_1_LIMIT - 4); /* Set stack pointer*/
         
-        // Establish sibling pointers for your Round-Robin scheduler [20-22]
+        /* Establish sibling pointers for your Round-Robin scheduler*/
         idle_pcb->sibling = init_pcb;
         init_pcb->sibling = idle_pcb;
     }
 
-    // 5. Final Handoff to user mode [11, 23, 24]
-    // Hardware restores whichever process is currently pointed to by 'current_process'
+    /*hardware restores whichever process is currently pointed to by current_process*/
     *ctx = current_process->usr_ctx;
     TracePrintf(0, "Leaving KernelStart, entering user mode as PID %d\n", current_process->pid);
 } 
