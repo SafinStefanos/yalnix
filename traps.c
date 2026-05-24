@@ -12,41 +12,44 @@ extern PCB_t* sleep_queue_head;
 void thandler(UserContext *usr_cont) {
     switch (usr_cont->vector) {
         case TRAP_CLOCK:
-            /*save the incoming user state into the pcb of the current process */
+            /*save incoming user state */
             memcpy(&current_process->usr_ctx, usr_cont, sizeof(UserContext));
-
-            /* iterate through sleep queue to wake up ready processes */
+            /* sleep queue */
             PCB_t *curr_sleep = sleep_queue_head;
             PCB_t *prev_sleep = NULL;
-            while (curr_sleep != NULL){
+            while(curr_sleep != NULL){
                 curr_sleep->delay--;
-                if (curr_sleep->delay <= 0) {
-                    /*remove from sleep list and mark as ready */
+                if(curr_sleep->delay <= 0){
+                    PCB_t *waking = curr_sleep; /* temp pointer to node to move */
                     if(prev_sleep == NULL)sleep_queue_head = curr_sleep->next;
                     else prev_sleep->next = curr_sleep->next;
-                    curr_sleep = curr_sleep->next;
-                } else {
+                    curr_sleep = curr_sleep->next; /*move loop to next node */
+                    
+                    /* re-enable process for scheduling */
+                    waking->state = STATE_READY;
+                    enqueue(ready_queue, &waking, sizeof(PCB_t *)); 
+                }else{
                     prev_sleep = curr_sleep;
                     curr_sleep = curr_sleep->next;
                 }
             }
-
-            /* round robin picking next sibling that is runnable*/
+            /* manage the ready queue */
             PCB_t *old_process = current_process;
-            current_process = current_process->sibling;
-            /*skip processes that are sleeping or blocked in Wait() */
-            while (current_process->delay > 0 || current_process->state == STATE_WAITING) {
-                current_process = current_process->sibling;
+            if (old_process->state == STATE_READY && old_process != idle_pcb) {
+                enqueue(ready_queue, &old_process, sizeof(PCB_t *)); 
+            }
+            
+            /*next process (use idle if nothing is ready) */
+            if (dequeue(ready_queue, &current_process, sizeof(PCB_t *)) == 1) {
+                current_process = idle_pcb; 
             }
 
-            /* perform the kernel stack and context switch */
+            /* switch ontexts and hardware mappings */
             KernelContextSwitch(KCSwitchFunc, old_process, current_process);
-
-            /* hardware remap of region one and tlb flush */
             WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
-            /* restore hardware state for return to user mode */
+            /* restore hardware state for new proc*/
             memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
 
