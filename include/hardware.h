@@ -226,15 +226,16 @@ typedef struct PCB {
   int ppid;
   int state;
   int exstat;
-  int kstack_pfn[4];
+  int kstack_pfn[21]; /* standard stack 2 pages */
   int init;
-  //void* heap_base;
-  int delay;
-  //void* brk;
+  void* heap_base; /* needed for brk validation */
+  void* brk; /* needed for heap tracking */
+  int delay;  /* used for sleep_ticks */
   struct PCB *parent;
   struct PCB *sibling;
   struct PCB *child;
-}; typedef struct PCB PCB_t;
+  struct PCB *next;   /* recommended for queueing */
+} PCB_t;
 
 /*
  *  Define the interrupt and exception vector numbers.  These numbers
