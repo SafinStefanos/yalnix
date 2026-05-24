@@ -98,61 +98,33 @@ KernelContext *KCSInitFunc(KernelContext *kc_in, void *pcb_v, void *unused) {
     return kc_in;
 }
 
-KernelContext *KCCopyFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v) {
-    PCB_t *curr = (PCB_t *)curr_pcb_v;
-    PCB_t *next = (PCB_t *)next_pcb_v;
+/* kccopyfunc: clones the current kernel stack using a temporary mapping */
+KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused) {
+    PCB_t *new_pcb = (PCB_t *)new_pcb_v;
+    new_pcb->krn_ctx = *kc_in; /* save the caller context into the new pcb */
 
-    TracePrintf(0, "next: pid=%d init=%d r1pt=%p kstack_pfn=[%d,%d,%d,%d] sibling=%p parent=%p child=%p state=%d\n",
-        next->pid, next->init, next->r1pt,
-        next->kstack_pfn[0], next->kstack_pfn[1], next->kstack_pfn[2], next->kstack_pfn[3],
-        next->sibling, next->parent, next->child, next->state);
-    TracePrintf(0, "KCSWitchFunc: curr=%p next=%p\n", curr, next);
+    /* use the virtual page right below the kernel stack as a window */
+    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
+    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT; /* exactly 2 pages */
 
-    if (curr == NULL || next == NULL) {
-        TracePrintf(0, "KCSSwitchFunc: NULL pcb!\n");
-        return NULL;
+    for (int i = 0; i < ks_npg; i++) {
+        /* map the new process's physical frame to our temporary virtual page */
+        KernelPT[temp_vpn].pfn = new_pcb->kstack_pfn[i];
+        KernelPT[temp_vpn].valid = 1;
+        KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
+        WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
+
+        /* copy from the actual current stack page to the temporary mapping */
+        memcpy((void *)(temp_vpn << PAGESHIFT), 
+               (void *)(KERNEL_STACK_BASE + (i * PAGESHIFT)), PAGESIZE);
     }
 
-    // Save current kernel context
-    curr->krn_ctx = *kc_in;
-    curr->init = 1;
+    /* unmap the temporary window and flush the tlb */
+    KernelPT[temp_vpn].valid = 0;
+    WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
 
-    // Switch region 1 page table always
-    WriteRegister(REG_PTBR1, (unsigned int)next->r1pt);
-    WriteRegister(REG_PTLR1, MAX_PT_LEN);
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
-
-    if (!next->init) {
-		TracePrintf(0, "KCSSwitchFunc: next not initialized, copying stack\n");
-		next->init = 1;
-
-		int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
-		int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
-
-		// Copy current stack contents into idle's frames before swapping
-		// Use a temporary mapping in region 0 to access idle's frames
-		// Actually: copy via physical addresses using a temp page
-		// Simpler: copy the stack contents while still on init's frames,
-		// then swap frames
-		void *ks_base = (void *)KERNEL_STACK_BASE;
-		size_t ks_size = KERNEL_STACK_MAXSIZE;
-
-		// Save stack contents to a temp buffer
-		char *tmp = (char *)malloc(ks_size);
-		memcpy(tmp, ks_base, ks_size);
-
-		// Swap kernel stack to next's frames
-		for (int i = 0; i < ks_npg; i++) {
-			KernelPT[ks_base_pg + i].pfn = next->kstack_pfn[i];
-		}
-		WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-
-		// Copy saved stack contents into idle's frames
-		memcpy(ks_base, tmp, ks_size);
-		free(tmp);
-
-		return kc_in;
-	}
+    return kc_in; /* parent returns immediately from the switch */
+}
 
     // Normal case: swap kernel stack frames
     int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
