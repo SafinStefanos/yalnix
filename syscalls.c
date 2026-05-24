@@ -213,6 +213,15 @@ int grow_stack(void *addr) {
     return SUCCESS;
 }
 
+int is_valid_ptr(void *ptr, int required_prot) {
+    unsigned int addr = (unsigned int)ptr;
+    if (addr < VMEM_1_BASE || addr >= VMEM_1_LIMIT) return 0;
+    int vpn = (addr - VMEM_1_BASE) >> PAGESHIFT;
+    pte_t *pte = &current_process->r1pt[vpn];
+    if (!pte->valid) return 0;
+    if ((pte->prot & required_prot) != required_prot) return 0;
+    return 1;
+}
 
 
 
