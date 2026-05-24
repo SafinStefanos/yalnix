@@ -1,82 +1,88 @@
 #include <hardware.h>
 #include <traps.h>
-#include <load_info.h>
 #include <yalnix.h>
 #include <ykernel.h>
 #include <kern.h>
 #include <syscalls.h>
 
 extern PCB_t* current_process;
+extern PCB_t* sleep_queue_head;
 
-/* thandler: Integrated trap handler for Checkpoint 3 */
+/* thandler: handles all hardware traps and syscalls */
 void thandler(UserContext *usr_cont) {
     switch (usr_cont->vector) {
         case TRAP_CLOCK:
-            TracePrintf(1, "TRAP_CLOCK: PID %d\n", current_process->pid);
-
-            /*current state saved to PCB*/
+            /* save the incoming user state into the pcb of the current process */
             memcpy(&current_process->usr_ctx, usr_cont, sizeof(UserContext));
 
-            /*round robin*/
-            PCB_t *old_process = current_process;
-            current_process = current_process->sibling;
-
-            /*stack swap*/
-            if (KernelContextSwitch(KCSwitchFunc, old_process, current_process) == -1) {
-                TracePrintf(0, "trap_clock: KernelContextSwitch failed\n");
-                Halt();
+            /* iterate through the sleep queue to wake up ready processes */
+            PCB_t *curr_sleep = sleep_queue_head;
+            PCB_t *prev_sleep = NULL;
+            while (curr_sleep != NULL) {
+                curr_sleep->delay--;
+                if (curr_sleep->delay <= 0) {
+                    /* remove from sleep list and mark as ready */
+                    if (prev_sleep == NULL) sleep_queue_head = curr_sleep->next;
+                    else prev_sleep->next = curr_sleep->next;
+                    curr_sleep = curr_sleep->next;
+                } else {
+                    prev_sleep = curr_sleep;
+                    curr_sleep = curr_sleep->next;
+                }
             }
 
-            /*tell process new r1*/
+            /* round robin: pick the next sibling that is not sleeping */
+            PCB_t *old_process = current_process;
+            current_process = current_process->sibling;
+            while (current_process->delay > 0) {
+                current_process = current_process->sibling;
+            }
+
+            /* perform the kernel stack and context switch */
+            KernelContextSwitch(KCSwitchFunc, old_process, current_process);
+
+            /* mandatory hardware remap of region one and tlb flush */
             WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
-            /*TLB flush of region 1*/
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
-            /*restore state for trap return*/
+            /* restore hardware state for return to user mode */
             memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
 
         case TRAP_KERNEL:
-            TracePrintf(1, "TRAP_KERNEL: syscall code 0x%x\n", usr_cont->code);
-            
+            /* syscall dispatcher for checkpoint three calls */
             switch (usr_cont->code) {
                 case YALNIX_GETPID:
-                    /*current pid --> regs*/
                     usr_cont->regs = current_process->pid;
                     break;
-
                 case YALNIX_BRK:
-                    /*brk*/
                     usr_cont->regs = sys_brk(current_process, (void *)usr_cont->regs);
                     break;
-
                 case YALNIX_DELAY:
-                    /*delay stuff*/
                     usr_cont->regs = sys_delay(current_process, (int)usr_cont->regs);
                     break;
-
                 default:
-                    TracePrintf(1, "Unhandled Syscall 0x%x\n", usr_cont->code);
                     usr_cont->regs = ERROR;
                     break;
             }
             break;
 
         case TRAP_MEMORY:
-            /*abort on bad mem access*/
-            TracePrintf(0, "TRAP_MEMORY: Fault at addr %p, PID %d aborted\n", 
-                        usr_cont->addr, current_process->pid);
-            Halt(); /*halt*/
+            /* check for the init death rule */
+            if (current_process->pid == 1) {
+                TracePrintf(0, "init process aborted due to memory fault\n");
+                Halt();
+            }
+            /* for now simply halt if any process hits a memory fault */
+            Halt();
             break;
 
         default: 
-            /* TRAP_ILLEGAL, TRAP_MATH, etc*/
-            TracePrintf(0, "Unhandled trap %d at PC %p, PID %d aborted\n", 
-                        usr_cont->vector, usr_cont->pc, current_process->pid);
+            /* halt on math or illegal instruction traps for now */
             Halt();
             break;
     }
-} 
+}
 /*
 	if(usr_cont==TRAP_KERNEL)
 		Long conditional statement to figure out which syscall happened
