@@ -72,18 +72,18 @@ KCSwitch
 	Reset scheduling tick count
 
 */
-int find_free() {
-	for (int j = 0; j < MAX_PMEM_SIZE/PAGESIZE; j++) {
-		if (frames[j] == 0) return j;
+int find_free(){
+	for (int j = 0; j < MAX_PMEM_SIZE/PAGESIZE; j++){
+		if(frames[j] == 0)return j;
 	}
 	return ERROR;
 }
 
 
 
-void free_region1(pte_t *pt) {
-    for (int i = 0; i < MAX_PT_LEN; i++) {
-        if (pt[i].valid /* && i >= (VMEM_1_BASE >> PAGESHIFT)*/) {
+void free_region1(pte_t *pt){
+    for (int i = 0; i < MAX_PT_LEN; i++){
+        if (pt[i].valid /* && i >= (VMEM_1_BASE >> PAGESHIFT)*/){
             frames[pt[i].pfn] = 0;
             pt[i].valid = 0;
 			pt[i].prot = 0;
@@ -92,14 +92,14 @@ void free_region1(pte_t *pt) {
     }
 }
 
-KernelContext *KCSInitFunc(KernelContext *kc_in, void *pcb_v, void *unused) {
+KernelContext *KCSInitFunc(KernelContext *kc_in, void *pcb_v, void *unused){
     PCB_t *pcb = (PCB_t *)pcb_v;
     pcb->krn_ctx = *kc_in;
     return kc_in;
 }
 
 /* kccopyfunc: clones the current kernel stack using a temporary mapping */
-KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused) {
+KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused){
     PCB_t *new_pcb = (PCB_t *)new_pcb_v;
     new_pcb->krn_ctx = *kc_in; /* save the caller context into the new pcb */
 
@@ -107,7 +107,7 @@ KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused) {
     int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
     int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT; /* exactly 2 pages */
 
-    for (int i = 0; i < ks_npg; i++) {
+    for(int i = 0; i < ks_npg; i++){
         /* map the new process's physical frame to our temporary virtual page */
         KernelPT[temp_vpn].pfn = new_pcb->kstack_pfn[i];
         KernelPT[temp_vpn].valid = 1;
@@ -129,7 +129,7 @@ KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused) {
     /*swap kernel stack frames*/
     int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
     int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
-    for (int i = 0; i < ks_npg; i++) {
+    for (int i = 0; i < ks_npg; i++){
         KernelPT[ks_base_pg + i].pfn = next->kstack_pfn[i];
     }
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
@@ -137,7 +137,7 @@ KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused) {
     return &next->krn_ctx;
 }
 
-KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v) {
+KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v){
     PCB_t *curr = (PCB_t *)curr_pcb_v;
     PCB_t *next = (PCB_t *)next_pcb_v;
 
@@ -145,7 +145,7 @@ KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_p
                 next->pid, next->init, next->r1pt, next->kstack_pfn, next->kstack_pfn[5], next->kstack_pfn[6], next->kstack_pfn[7], next->sibling, next->parent, next->child, next->state);
     TracePrintf(0, "KCSWitchFunc: curr=%p next=%p\n", curr, next);
 
-    if (curr == NULL || next == NULL) {
+    if(curr == NULL || next == NULL){
         TracePrintf(0, "KCSSwitchFunc: NULL pcb!\n");
         return NULL;
     }
@@ -159,7 +159,7 @@ KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_p
     int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT; /*swapping kernel stack frames*/
     int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
 
-    for (int i = 0; i < ks_npg; i++) { /*change pagetable before flush*/
+    for(int i = 0; i < ks_npg; i++){ /*change pagetable before flush*/
         KernelPT[ks_base_pg + i].pfn = next->kstack_pfn[i];
         KernelPT[ks_base_pg + i].valid = 1;
         KernelPT[ks_base_pg + i].prot = PROT_READ | PROT_WRITE;
@@ -178,24 +178,24 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     int i;
 
     // Initialize frame tracker
-    for (i = 0; i < num_frames; i++) {
+    for(i = 0; i < num_frames; i++){
         frames[i] = (i < _orig_kernel_brk_page) ? 1 : 0;
     }
 
     // Initialize kernel page table
-    for (i = 0; i < MAX_PT_LEN; i++) {
+    for(i = 0; i < MAX_PT_LEN; i++){
         KernelPT[i].valid = 0;
     }
 
     // Map kernel text pages
-    for (i = _first_kernel_text_page; i < _first_kernel_data_page; i++) {
+    for(i = _first_kernel_text_page; i < _first_kernel_data_page; i++){
         KernelPT[i].valid = 1;
         KernelPT[i].pfn = i;
         KernelPT[i].prot = PROT_READ | PROT_EXEC;
     }
 
     // map kernel data/heap pages
-    for (i = _first_kernel_data_page; i < _orig_kernel_brk_page; i++) {
+    for (i = _first_kernel_data_page; i < _orig_kernel_brk_page; i++){
         KernelPT[i].valid = 1;
         KernelPT[i].pfn = i;
         KernelPT[i].prot = PROT_READ | PROT_WRITE;
@@ -220,17 +220,16 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
 
     curr_kbrk = (void *)UP_TO_PAGE(sbrk(0));
 
-    // ---- Create init PCB ---- [6, 7]
+    // Create init pcb
     init_pcb = (PCB_t *)malloc(sizeof(PCB_t));
     memset(init_pcb, 0, sizeof(PCB_t));
     init_pcb->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
     for (i = 0; i < MAX_PT_LEN; i++) init_pcb->r1pt[i].valid = 0;
     init_pcb->pid = helper_new_pid(init_pcb->r1pt);
 
-    // ---- Create idle PCB ---- [8]
+    /*make idle pcb*/
     idle_pcb = (PCB_t *)malloc(sizeof(PCB_t));
     memset(idle_pcb, 0, sizeof(PCB_t));
-    // Diagnostic traceprint as per your snippet
     TracePrintf(0, "idle_pcb after memset: pid=%d init=%d kstack_pfn=[%d,%d] sibling=%p parent=%p state=%d\n",
                 idle_pcb->pid, idle_pcb->init,
                 idle_pcb->kstack_pfn, idle_pcb->kstack_pfn[9],
@@ -240,12 +239,12 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     for (i = 0; i < MAX_PT_LEN; i++) idle_pcb->r1pt[i].valid = 0;
     idle_pcb->pid = helper_new_pid(idle_pcb->r1pt);
 
-    // The current process (Idle) keeps the frames it is currently running on (0x7e, 0x7f)
+    // current proc keeps the frames it is currently running on (0x7e, 0x7f)
     for (i = 0; i < ks_npg; i++) {
         idle_pcb->kstack_pfn[i] = kstack_pfns[i];
     }
 
-    // Allocate NEW frames for the process we are about to clone (Init)
+    /* New frames for the process we are about to clone (Init)*/
     for (i = 0; i < ks_npg; i++) {
         int f = find_free();
         if (f == ERROR) {
@@ -256,7 +255,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         init_pcb->kstack_pfn[i] = f;
     }
 
-    // Allocate one user stack page for idle in region 1 [10-12]
+    /*Allocate one user stack page for idle in region 1*/
     int svpn = MAX_PT_LEN - 1;
     int fus = find_free();
     if (fus == ERROR) Halt();
@@ -265,25 +264,25 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     idle_pcb->r1pt[svpn].pfn = fus;
     idle_pcb->r1pt[svpn].prot = PROT_READ | PROT_WRITE;
 
-    // 1. Finalize the Page Tables and Enable VM [13, 14]
+    /*Finalize the PT nad enable VM*/
     WriteRegister(REG_PTBR0, (unsigned int)KernelPT);
     WriteRegister(REG_PTLR0, MAX_PT_LEN);
-    // Initially map Region 1 to Idle's page table [10, 12]
+    /* Initially map ri to idle's PT */
     WriteRegister(REG_PTBR1, (unsigned int)idle_pcb->r1pt); 
     WriteRegister(REG_PTLR1, MAX_PT_LEN);
     WriteRegister(REG_VM_ENABLE, 1);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_ALL);
 
-    /*Officially identify ourselves as the "Idle" process*/
+    /*Officially identify ourselves as the Idle process*/
     current_process = idle_pcb; 
 
-    /* 3. Clone the current state to create the "Init" process */
-    /* Both processes will eventually "wake up" right after this call.*/
+    /* lone the current state to create the "Init" process */
+    /* Both processes will eventually "wake up" right after this*/
     KernelContextSwitch(KCCopyFunc, init_pcb, NULL);
 
     /* for the split, are we the parent (Idle) or the child (Init)?*/
     if (current_process == init_pcb) {
-        /* I am the Init process: Overwrite my Region 1 with the real program*/
+        /* Overwrite my r1 with the real program*/
         char *init_name = (argv && argv) ? argv : "init";
         TracePrintf(1, "Init process starting: loading %s\n", init_name);
         if (LoadProgram(init_name, argv, init_pcb) != SUCCESS) {
@@ -294,10 +293,10 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     } else {
         /* Set up the shortcut to run DoIdle */
         idle_pcb->usr_ctx = *ctx; /*Use default context as template*/
-        idle_pcb->usr_ctx.pc = (void *)DoIdle; /*Jump to your idle loop*/
-        idle_pcb->usr_ctx.sp = (void *)(VMEM_1_LIMIT - 4); /* Set stack pointer*/
+        idle_pcb->usr_ctx.pc = (void *)DoIdle; /*Jump to our idle loop*/
+        idle_pcb->usr_ctx.sp = (void *)(VMEM_1_LIMIT - 4); /* set stack pointer*/
         
-        /* Establish sibling pointers for your Round-Robin scheduler*/
+        /* establish sibling pointers for round-robin scheduler*/
         idle_pcb->sibling = init_pcb;
         init_pcb->sibling = idle_pcb;
     }
@@ -307,16 +306,16 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     TracePrintf(0, "Leaving KernelStart, entering user mode as PID %d\n", current_process->pid);
 } 
 
-int SetKernelBrk(void *addr) {
+int SetKernelBrk(void *addr){
     unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
     unsigned int curr_brk = (unsigned int)UP_TO_PAGE(curr_kbrk);
 
-	if (new_brk >= KERNEL_STACK_BASE) {
+	if(new_brk >= KERNEL_STACK_BASE){
         TracePrintf(0, "SetKernelBrk: Error - Kernel heap collision with kernel stack.\n");
         return ERROR;
     } /*looking for collision between  new break and kernel stack base. The heap cannot start behind the stack*/
 
-	if (ReadRegister(REG_VM_ENABLE) == 0) {
+	if(ReadRegister(REG_VM_ENABLE) == 0){
         curr_kbrk = (void *)new_brk;
         return SUCCESS;
     } /*check for enabled VM*/
