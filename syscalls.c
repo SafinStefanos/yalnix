@@ -1,9 +1,11 @@
 #include <hardware.h>
 #include <load_info.h>
 #include <yuser.h>
-#include <struct_helpers.h>
 #include <unistd.h>
 #include <yalnix.h>
+#include <ykernel.h>
+#include <traps.h>
+#include <kern.h>
 
 /*
 
@@ -149,3 +151,59 @@ Reclaim
 
 
 */
+/*
+int sys_brk(PCB_t *proc, void *addr) {
+    unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
+    unsigned int cur_brk = (unsigned int)UP_TO_PAGE(proc->brk);
+
+    // can't go below initial data end or above stack
+    if ((unsigned int)addr < (unsigned int)proc->heap_base) {
+        return ERROR;
+    }
+    if (new_brk >= (unsigned int)proc->usr_ctx.sp) {
+        return ERROR;
+    }
+
+    int data_pg1 = ((int)proc->heap_base - VMEM_1_BASE) >> PAGESHIFT;
+    int new_vpn = (new_brk - VMEM_1_BASE) >> PAGESHIFT;
+    int cur_vpn = (cur_brk - VMEM_1_BASE) >> PAGESHIFT;
+
+    if (new_vpn > cur_vpn) {
+        // growing heap
+        for (int i = cur_vpn; i < new_vpn; i++) {
+            int f = find_free();
+            if (f == ERROR) {
+                // undo partial allocation
+                for (int j = cur_vpn; j < i; j++) {
+                    frames[proc->r1pt[j].pfn] = 0;
+                    proc->r1pt[j].valid = 0;
+                    proc->r1pt[j].pfn = 0;
+                }
+                WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+                return ERROR;
+            }
+            frames[f] = 1;
+            proc->r1pt[i].valid = 1;
+            proc->r1pt[i].pfn = f;
+            proc->r1pt[i].prot = PROT_READ | PROT_WRITE;
+        }
+    } else if (new_vpn < cur_vpn) {
+        // shrinking heap
+        for (int i = new_vpn; i < cur_vpn; i++) {
+            if (proc->r1pt[i].valid) {
+                frames[proc->r1pt[i].pfn] = 0;
+                proc->r1pt[i].valid = 0;
+                proc->r1pt[i].pfn = 0;
+            }
+        }
+    }
+
+    proc->brk = (void *)new_brk;
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+    return SUCCESS;
+}
+*/
+int sys_getpid(PCB_t *proc) {
+    return proc->pid;
+}
+

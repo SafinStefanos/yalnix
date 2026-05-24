@@ -4,23 +4,63 @@
 #include <load_info.h>
 #include <yalnix.h>
 #include <ykernel.h>
-#include <struct_helpers.h>
+#include <kern.h>
+#include <syscalls.h>
 
+extern PCB_t* current_process;
 
 // Plan is to move all of these to their own functions when actually implementing
-void thandler(UserContext usr_cont) {
-	 switch (usr_cont.vector) {
+void thandler(UserContext *usr_cont) {
+	 switch (usr_cont->vector) {
         
         case TRAP_CLOCK:
             TracePrintf(1, "TRAP_CLOCK\n");
-            break;
+		
+			memcpy(&current_process->usr_ctx, usr_cont, sizeof(UserContext));
+			PCB_t *prev = current_process;
+			current_process = current_process->sibling;  // update BEFORE switch
+
+			if (KernelContextSwitch(KCSwitchFunc, prev, current_process) == -1) {
+				TracePrintf(0, "trap_clock: KernelContextSwitch failed\n");
+				current_process = prev;  // roll back on failure
+				break;
+			}
+			memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
+			break;
+
         case TRAP_KERNEL:
             /*Hex for format. example, 0xabcdef01.*/
-            TracePrintf(1, "TRAP_KERNEL: syscall code 0x%x\n", usr_cont.code);
+            TracePrintf(1, "TRAP_KERNEL: syscall code 0x%x\n", usr_cont->code);
+			switch (usr_cont->code) {
+				case YALNIX_BRK:
+					TracePrintf(1, "Brk Syscall\n");
+					//sys_brk(current_process, (void*)usr_cont->regs[0]);
+					break;
+				case YALNIX_GETPID:
+					TracePrintf(1, "GetPid Syscall\n");
+					if (current_process == NULL) {
+        				TracePrintf(0, "GETPID: current_process is NULL!\n");
+        				usr_cont->regs[0] = ERROR;
+        				break;
+    				}
+					usr_cont->regs[0] = sys_getpid(current_process);
+					TracePrintf(1, "PID = %d\n", usr_cont->regs[0]);
+					break;
+				case YALNIX_DELAY:
+					//usr_cont->regs[0] = sys_delay(current_process, usr_cont, (int)usr_cont->regs[0]);
+					TracePrintf(1, "Delay Syscall\n");
+					break;
+				default:
+					TracePrintf(1, "Unhandled Syscall\n");
+					break;
+			}
             break;
+		
+		
         default: /*unexpected trap occurences*/
-            TracePrintf(0, "Unhandled trap: %d at PC %p\n", usr_cont.vector, usr_cont.pc);
+            TracePrintf(0, "Unhandled trap: %d at PC %p\n", usr_cont->vector, usr_cont->pc);
             /*maybe halt here irl if kernel error*/
+			Pause();
             break;
     }
 }

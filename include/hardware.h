@@ -227,6 +227,10 @@ typedef struct PCB {
   int state;
   int exstat;
   int kstack_pfn[4];
+  int init;
+  //void* heap_base;
+  int delay;
+  //void* brk;
   struct PCB *parent;
   struct PCB *sibling;
   struct PCB *child;
