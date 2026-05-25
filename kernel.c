@@ -171,6 +171,9 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         frames[i] = (i < _orig_kernel_brk_page) ? 1 : 0;
     }
 
+	ready_queue = init_queue(); 
+    sleep_queue_head = NULL; 
+
     // Initialize kernel page table
     for(i = 0; i < MAX_PT_LEN; i++){
         KernelPT[i].valid = 0;
