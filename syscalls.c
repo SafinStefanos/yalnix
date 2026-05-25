@@ -177,8 +177,6 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
         child->kstack_pfn[i] = f;
     }
 
-    // copy parent's region 1 page table -- copy on write would be better
-    // but for now do a full copy
     int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;  // temp mapping window
 
     for (int i = 0; i < MAX_PT_LEN; i++) {
@@ -320,8 +318,6 @@ int sys_wait(PCB_t *proc, UserContext *uc, int *status_ptr) {
             prev = child;
             child = child->sibling;
         }
-
-        // no zombie yet -- block
         proc->state = WAITING;
         memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
 
