@@ -3,9 +3,9 @@
 #include <ykernel.h>
 #include <idle.h>
 
-int DoIdle(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
     while (1) {
-        TracePrintf(1,"DoIdle\n");
+        TracePrintf(1,"\n====Idle====\n");
         Pause();
     }
     return 0;

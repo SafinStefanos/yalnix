@@ -13,6 +13,7 @@
 #include <load.h>
 #include <yalnix.h>
 #include <kern.h>
+#include <load.h>
 
 
 extern unsigned char frames[];
@@ -132,6 +133,8 @@ int LoadProgram(char *name, char *args[], PCB_t* pcb){
         pt[pg].prot = PROT_READ | PROT_WRITE;
         allocPages++;
     }
+    pcb->heap_base = (void *)UP_TO_PAGE(li.ud_end);
+    pcb->brk = pcb->heap_base;
 
     /* then stack. allocate physical pages and map them to the top of the region virtual address space. these pages should be marked valid with a protection of read and write */
     allocPages = 0;

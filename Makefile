@@ -12,14 +12,14 @@
 K_SRC_DIR = .
 
 # What are the kernel c and include files? 
-K_SRCS = kernel.c traps.c syscalls.c idle.c
+K_SRCS = kernel.c traps.c syscalls.c load.c
 #K_INCS = kernel.h hardware.h traps.h yalnix.h yuser.h ykernel.h idle.h
 
 # Where's your user source?
 U_SRC_DIR = .
 
 # What are the user c and include files?
-U_SRCS = 
+U_SRCS = idle.c init.c cp3Test.c
 U_INCS = 
 
 

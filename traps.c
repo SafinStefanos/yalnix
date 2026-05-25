@@ -24,7 +24,8 @@ void thandler(UserContext *usr_cont) {
                     /* remove from sleep list and mark as ready */
                     if (prev_sleep == NULL) sleep_queue_head = curr_sleep->next;
                     else prev_sleep->next = curr_sleep->next;
-                    curr_sleep = curr_sleep->next;
+                    PCB_t *tmp = curr_sleep->next;
+                    curr_sleep = tmp;
                 } else {
                     prev_sleep = curr_sleep;
                     curr_sleep = curr_sleep->next;
@@ -50,18 +51,20 @@ void thandler(UserContext *usr_cont) {
             break;
 
         case TRAP_KERNEL:
+            TracePrintf(0, "TRAP_KERNEL: current_process=%p pid=%d sibling=%p\n",
+            current_process, current_process->pid, current_process->sibling);
             switch (usr_cont->code) {
                 case YALNIX_GETPID:
-                    usr_cont->regs = current_process->pid;
+                    usr_cont->regs[0] = current_process->pid;
                     break;
                 case YALNIX_BRK:
-                    usr_cont->regs = sys_brk(current_process, (void *)usr_cont->regs);
+                    usr_cont->regs[0] = sys_brk(current_process, (void *)usr_cont->regs[0]);
                     break;
                 case YALNIX_DELAY:
-                    usr_cont->regs = sys_delay(current_process, (int)usr_cont->regs);
+                    usr_cont->regs[0] = sys_delay(current_process, (int)usr_cont->regs[0]);
                     break;
                 default:
-                    usr_cont->regs = ERROR;
+                    usr_cont->regs[0] = ERROR;
                     break;
             }
             break;

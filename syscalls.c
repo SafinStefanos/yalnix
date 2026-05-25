@@ -9,6 +9,15 @@
 
 /* sys_brk adjusts user heap with red zone and collision checks */
 int sys_brk(PCB_t *proc, void *addr) {
+	TracePrintf(0, "sys_brk: addr=%p brk=%p heap_base=%p sp=%p\n",
+        addr, proc->brk, proc->heap_base, proc->usr_ctx.sp);
+	if (addr == NULL) return (int)proc->brk;
+	if ((unsigned int)addr >= VMEM_1_LIMIT || 
+        (unsigned int)addr < VMEM_1_BASE) {
+        TracePrintf(0, "sys_brk: addr %p out of region 1\n", addr);
+        return ERROR;
+    }	
+
     unsigned int new_brk = (unsigned int)UP_TO_PAGE(addr);
     unsigned int cur_brk = (unsigned int)UP_TO_PAGE(proc->brk);
 
@@ -51,21 +60,35 @@ int sys_brk(PCB_t *proc, void *addr) {
 }
 
 /* sys_delay validates input and moves process to sleep queue */
-int sys_delay(PCB_t *proc, int ticks) {
+int sys_delay(PCB_t *proc, UserContext *uc, int ticks) {
     if (ticks == 0) return SUCCESS;
-    if (ticks < 0) return ERROR; /* time travel is not allowed */
+    if (ticks < 0) return ERROR;
+
+    TracePrintf(0, "sys_delay: pid=%d ticks=%d\n", proc->pid, ticks);
+
+    memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
 
     proc->delay = ticks;
     proc->next = sleep_queue_head;
     sleep_queue_head = proc;
 
-    /* immediately switch to the next ready process */
-    PCB_t *old_proc = proc;
-    current_process = proc->sibling; 
-    while (current_process->delay > 0) {
-        current_process = current_process->sibling;
+    PCB_t *next = proc->sibling;
+    while (next != proc && next->delay > 0) {
+        next = next->sibling;
     }
-    KernelContextSwitch(KCSwitchFunc, old_proc, current_process);
+    if (next == proc || next == NULL) {
+        TracePrintf(0, "sys_delay: no ready process!\n");
+        return ERROR;
+    }
+
+    current_process = next;
+    KernelContextSwitch(KCSwitchFunc, proc, current_process);
+
+    // when we return here, the clock has switched us back
+    // current_process is already set back to proc by the clock handler
+    WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
+    WriteRegister(REG_PTLR1, MAX_PT_LEN);
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
     return SUCCESS;
 }

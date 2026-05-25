@@ -12,6 +12,7 @@
 
 int sys_brk(PCB_t *proc, void *addr);
 int sys_getpid(PCB_t *proc);
-int sys_delay(PCB_t *proc, UserContext *uc, int ticks);
+int sys_delay(PCB_t *proc, int ticks);
+void sys_exit(PCB_t *proc, int status);
 
 #endif /* _syscalls_h */

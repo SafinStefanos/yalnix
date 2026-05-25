@@ -226,7 +226,7 @@ typedef struct PCB {
   int ppid;
   int state;
   int exstat;
-  int kstack_pfn[21]; /* standard stack 2 pages */
+  int kstack_pfn[2]; /* standard stack 2 pages */
   int init;
   void* heap_base; /* needed for brk validation */
   void* brk; /* needed for heap tracking */
