@@ -99,42 +99,31 @@ KernelContext *KCSInitFunc(KernelContext *kc_in, void *pcb_v, void *unused){
 }
 
 /* kccopyfunc: clones the current kernel stack using a temporary mapping */
-KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused){
-    PCB_t *new_pcb = (PCB_t *)new_pcb_v;
-    new_pcb->krn_ctx = *kc_in; /* save the caller context into the new pcb */
+kernelcontext *kccopyfunc(kernelcontext *kc_in, void *new_pcb_v, void *unused) {
+    pcb_t *new_pcb = (pcb_t *)new_pcb_v;
+    new_pcb->krn_ctx = *kc_in; /* save parent context */
 
-    /* use the virtual page right below the kernel stack as a window */
-    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
-    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT; /* exactly 2 pages */
+    /* use page below stack as window */
+    int temp_vpn = (kernel_stack_base >> pageshift) - 1; 
+    int ks_npg = kernel_stack_maxsize >> pageshift; 
 
-    for(int i = 0; i < ks_npg; i++){
-        /* map the new process's physical frame to our temporary virtual page */
-        KernelPT[temp_vpn].pfn = new_pcb->kstack_pfn[i];
-        KernelPT[temp_vpn].valid = 1;
-        KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
-        WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
+    for(int i = 0; i < ks_npg; i++) {
+        /* map child frame to window */
+        kernelpt[temp_vpn].pfn = new_pcb->kstack_pfn[i];
+        kernelpt[temp_vpn].valid = 1;
+        kernelpt[temp_vpn].prot = prot_read | prot_write;
+        writeregister(reg_tlb_flush, (unsigned int)(temp_vpn << pageshift));
 
-        /* copy from the actual current stack page to the temporary mapping */
-        memcpy((void *)(temp_vpn << PAGESHIFT), 
-               (void *)(KERNEL_STACK_BASE + (i * PAGESHIFT)), PAGESIZE);
+        /* copy page contents while mapped */
+        memcpy((void *)(temp_vpn << pageshift), 
+               (void *)(kernel_stack_base + (i * pageshift)), pagesize);
     }
 
-    /* unmap the temporary window and flush the tlb */
-    KernelPT[temp_vpn].valid = 0;
-    WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
+    /* cleanup window */
+    kernelpt[temp_vpn].valid = 0;
+    writeregister(reg_tlb_flush, (unsigned int)(temp_vpn << pageshift));
 
-    return kc_in; /* parent returns immediately from the switch */
-}
-
-    /*swap kernel stack frames*/
-    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
-    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
-    for (int i = 0; i < ks_npg; i++){
-        KernelPT[ks_base_pg + i].pfn = next->kstack_pfn[i];
-    }
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-
-    return &next->krn_ctx;
+    return kc_in; 
 }
 
 KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v){
