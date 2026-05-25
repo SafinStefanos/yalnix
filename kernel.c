@@ -251,7 +251,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
 
     curr_kbrk = (void *)UP_TO_PAGE(sbrk(0));
 
-    // ---- Create init PCB ----
+    // Create init PCB 
     init_pcb = (PCB_t *)malloc(sizeof(PCB_t));
     memset(init_pcb, 0, sizeof(PCB_t));
     init_pcb->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
@@ -261,7 +261,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         init_pcb->kstack_pfn[i] = kstack_pfns[i];
     }
 
-    // ---- Create idle PCB ----
+    // Create idle PCB 
     idle_pcb = (PCB_t *)malloc(sizeof(PCB_t));
     memset(idle_pcb, 0, sizeof(PCB_t));
     idle_pcb->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
@@ -272,7 +272,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         init_pcb->kstack_pfn[i] = kstack_pfns[i];
     }
 
-    // Allocate idle's kernel stack frames (separate from init's)
+    // Allocate idle's kernel stack frames
     for (i = 0; i < ks_npg; i++) {
         int f = find_free();
         frames[f] = 1;
@@ -317,6 +317,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         idle_pcb->usr_ctx.pc, idle_pcb->usr_ctx.sp);
     TracePrintf(0, "init usr_ctx.pc=%p sp=%p\n",
         init_pcb->usr_ctx.pc, init_pcb->usr_ctx.sp);
+	
     // Set up sibling pointers
     idle_pcb->sibling = init_pcb;
     init_pcb->sibling = idle_pcb;
