@@ -94,40 +94,46 @@ void sys_exit(PCB_t *proc, int status){
 
 
 /* clones current process */
-int sys_fork(PCB_t *parent){
-    PCB_t *child = (PCB_t *)malloc(sizeof(PCB_t));
-    child->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
+int sys_fork(pcb_t *parent) {
+    pcb_t *child = (pcb_t *)malloc(sizeof(pcb_t));
+    child->r1pt = (pte_t *)malloc(sizeof(pte_t) * max_pt_len);
     child->pid = helper_new_pid(child->r1pt);
-
-    /* copy user memory via temp region 0 window */
-    int temp_vpn=(KERNEL_STACK_BASE >> PAGESHIFT) - 1;
-    for(int i = 0; i < MAX_PT_LEN; i++){
+    /* copy user space */
+    int temp_vpn = (kernel_stack_base >> pageshift) - 1;
+    for (int i = 0; i < max_pt_len; i++) {
         if (parent->r1pt[i].valid) {
             int f = find_free();
+            if (f == error) return error;
+            frames[f] = 1; /* mark as used */
             child->r1pt[i] = parent->r1pt[i];
             child->r1pt[i].pfn = f;
             
-            KernelPT[temp_vpn].pfn = f;
-            KernelPT[temp_vpn].valid = 1;
-            KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
-            WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
-            
-            memcpy((void *)(temp_vpn << PAGESHIFT), (void *)(VMEM_1_BASE + (i * PAGESHIFT)), PAGESIZE);
+            kernelpt[temp_vpn].pfn = f;
+            kernelpt[temp_vpn].valid = 1;
+            kernelpt[temp_vpn].prot = prot_read | prot_write;
+            writeregister(reg_tlb_flush, (unsigned int)(temp_vpn << pageshift));
+            memcpy((void *)(temp_vpn << pageshift), 
+                   (void *)(vmem_1_base + (i * pageshift)), pagesize);
         }
     }
-    KernelPT[temp_vpn].valid=0;
-
-    /* allocate child kstack frames and clone */
-    for(int i=0; i<2; i++)child->kstack_pfn[i] = find_free();
-    KernelContextSwitch(KCCopyFunc, child, NULL);
-
+    kernelpt[temp_vpn].valid = 0;
+    /* setup child kernel stack */
+    for (int i = 0; i < 2; i++) {
+        int f = find_free();
+        if (f == error) return error;
+        frames[f] = 1; /* mark as used */
+        child->kstack_pfn[i] = f;
+    }
+    /* clone kernel context */
+    kernelcontextswitch(kccopyfunc, child, null);
+    /* child return path */
     if (current_process == child) return 0;
-    
-    /* parent: link child and ready it */
+    /* parent return path */
     child->parent = parent;
     child->sibling = parent->children;
     parent->children = child;
-    enqueue(ready_queue, child, sizeof(PCB_t *)); 
+    child->state = state_ready;
+    enqueue(ready_queue, child, sizeof(pcb_t *)); 
     return child->pid;
 }
 /*replace program image*/
