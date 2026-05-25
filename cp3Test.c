@@ -7,7 +7,7 @@
 int main() {
     TracePrintf(0, "=== Yalnix Syscall Test Program ===\n");
 
-    /* ---- Test GetPid ---- */
+    /* Test GetPid */
     TracePrintf(0, "\n[TEST] GetPid\n");
     int pid = GetPid();
     TracePrintf(0, "  GetPid returned: %d\n", pid);
@@ -17,7 +17,7 @@ int main() {
         TracePrintf(0, "  FAIL: invalid pid\n");
     }
 
-    /* ---- Test Brk ---- */
+    /* Test Brk */
     TracePrintf(0, "\n[TEST] Brk\n");
     extern void *_end;  // linker symbol for end of data segment
     void *base = (void *)UP_TO_PAGE(&_end);
@@ -44,7 +44,7 @@ int main() {
         TracePrintf(0, "  FAIL: Brk invalid addr should have failed\n");
     }
 
-    /* ---- Test Delay ---- */
+    /* Test Delay */
     TracePrintf(0, "\n[TEST] Delay\n");
 
     // invalid delay
@@ -63,7 +63,7 @@ int main() {
         TracePrintf(0, "  FAIL: Delay(0) failed rc=%d\n", rc);
     }
 
-    // real delay -- should context switch to idle and come back
+    // should context switch to idle and come back
     TracePrintf(0, "  Delaying for 3 ticks...\n");
     rc = Delay(3);
     if (rc == 0) {
@@ -72,7 +72,7 @@ int main() {
         TracePrintf(0, "  FAIL: Delay(3) failed rc=%d\n", rc);
     }
 
-    /* ---- Test multiple delays to verify scheduling ---- */
+    /* Test multiple delays to verify scheduling */
     TracePrintf(0, "\n[TEST] Multiple Delays\n");
     for (int i = 1; i <= 3; i++) {
         TracePrintf(0, "  Delay iteration %d: delaying 2 ticks\n", i);
@@ -81,7 +81,7 @@ int main() {
     }
     TracePrintf(0, "  PASS: multiple delays completed\n");
 
-    /* ---- Test GetPid again after delays ---- */
+    /* Test GetPid again after delays */
     TracePrintf(0, "\n[TEST] GetPid after delays\n");
     int pid2 = GetPid();
     if (pid2 == pid) {
