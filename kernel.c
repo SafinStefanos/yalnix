@@ -80,7 +80,6 @@ int find_free(){
 }
 
 
-
 void free_region1(pte_t *pt){
     for (int i = 0; i < MAX_PT_LEN; i++){
         if (pt[i].valid /* && i >= (VMEM_1_BASE >> PAGESHIFT)*/){
@@ -101,46 +100,51 @@ KernelContext *KCSInitFunc(KernelContext *kc_in, void *pcb_v, void *unused){
 }
 
 /* kccopyfunc: clones the current kernel stack using a temporary mapping */
-KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused){
+/*
+KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused) {
     PCB_t *new_pcb = (PCB_t *)new_pcb_v;
-    new_pcb->krn_ctx = *kc_in; /* save the caller context into the new pcb */
 
-    /* use the virtual page right below the kernel stack as a window */
     int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
-    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT; /* exactly 2 pages */
+    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
+    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
 
-    for(int i = 0; i < ks_npg; i++){
-        /* map the new process's physical frame to our temporary virtual page */
+    // copy each kernel stack page into child's frames via temp mapping
+    for (int i = 0; i < ks_npg; i++) {
         KernelPT[temp_vpn].pfn = new_pcb->kstack_pfn[i];
         KernelPT[temp_vpn].valid = 1;
         KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
         WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
 
-        /* copy from the actual current stack page to the temporary mapping */
-        memcpy((void *)(temp_vpn << PAGESHIFT), 
-               (void *)(KERNEL_STACK_BASE + (i * PAGESHIFT)), PAGESIZE);
+        memcpy((void *)(temp_vpn << PAGESHIFT),
+               (void *)((ks_base_pg + i) << PAGESHIFT), PAGESIZE);
     }
 
-    /* unmap the temporary window and flush the tlb */
+    // unmap temp window
     KernelPT[temp_vpn].valid = 0;
     WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
 
-    return kc_in; /* parent returns immediately from the switch */
-
-    /*swap kernel stack frames*/
-    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
-    for (int i = 0; i < ks_npg; i++){
+    // remap kernel stack to child's frames
+    for (int i = 0; i < ks_npg; i++) {
         KernelPT[ks_base_pg + i].pfn = new_pcb->kstack_pfn[i];
+        KernelPT[ks_base_pg + i].valid = 1;
+        KernelPT[ks_base_pg + i].prot = PROT_READ | PROT_WRITE;
     }
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
 
-    return &new_pcb->krn_ctx;
-}
+    // save context into child NOW, after stack is remapped, so SP matches
+    new_pcb->krn_ctx = *kc_in;
+
+    return kc_in;
+} */
 
 KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v){
     PCB_t *curr = (PCB_t *)curr_pcb_v;
     PCB_t *next = (PCB_t *)next_pcb_v;
 
+    if (curr == next) {
+        TracePrintf(0, "KCSwitchFunc: ERROR switching to self pid=%d\n", curr->pid);
+        return kc_in;  // don't switch, just return
+    }
     TracePrintf(0, "next: pid=%d init=%d r1pt=%p kstack_pfn=[%d,%d] sibling=%p\n",
     next->pid, next->init, next->r1pt,
     next->kstack_pfn[0], next->kstack_pfn[1],
@@ -162,16 +166,25 @@ KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_p
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
     if (!next->init) {
-        TracePrintf(0, "KCSSwitchFunc: next not initialized, copying stack\n");
         next->init = 1;
 
-        void *ks_base = (void *)KERNEL_STACK_BASE;
-        size_t ks_size = KERNEL_STACK_MAXSIZE;
-        char *tmp = (char *)malloc(ks_size);
-        memcpy(tmp, ks_base, ks_size);
-
+        // copy current stack into child's frames via temp mapping
+        int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
         int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
         int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
+
+        for (int i = 0; i < ks_npg; i++) {
+            KernelPT[temp_vpn].pfn = next->kstack_pfn[i];
+            KernelPT[temp_vpn].valid = 1;
+            KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
+            WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
+            memcpy((void *)(temp_vpn << PAGESHIFT),
+                (void *)((ks_base_pg + i) << PAGESHIFT), PAGESIZE);
+        }
+        KernelPT[temp_vpn].valid = 0;
+        WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
+
+        // swap stack to child's frames
         for (int i = 0; i < ks_npg; i++) {
             KernelPT[ks_base_pg + i].pfn = next->kstack_pfn[i];
             KernelPT[ks_base_pg + i].valid = 1;
@@ -179,12 +192,10 @@ KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_p
         }
         WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
 
-        memcpy(ks_base, tmp, ks_size);
-        free(tmp);
-
-        // save kc_in into next's krn_ctx so future switches have a valid context
+        // save context NOW -- stack is child's, SP matches what hardware will see
         next->krn_ctx = *kc_in;
 
+        // return kc_in -- resumes on child's stack at same point
         return kc_in;
     }
 

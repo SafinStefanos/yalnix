@@ -6,6 +6,10 @@
 #include <ykernel.h>
 #include <traps.h>
 #include <kern.h>
+#include <load.h>
+
+extern PCB_t *idle_pcb;
+extern KernelContext *KCSwitchFunc();
 
 /* sys_brk adjusts user heap with red zone and collision checks */
 int sys_brk(PCB_t *proc, void *addr) {
@@ -64,28 +68,30 @@ int sys_delay(PCB_t *proc, UserContext *uc, int ticks) {
     if (ticks == 0) return SUCCESS;
     if (ticks < 0) return ERROR;
 
-    TracePrintf(0, "sys_delay: pid=%d ticks=%d\n", proc->pid, ticks);
-
     memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
-
     proc->delay = ticks;
+
+    // add to sleep queue
     proc->next = sleep_queue_head;
     sleep_queue_head = proc;
 
-    PCB_t *next = proc->sibling;
-    while (next != proc && next->delay > 0) {
-        next = next->sibling;
-    }
-    if (next == proc || next == NULL) {
-        TracePrintf(0, "sys_delay: no ready process!\n");
-        return ERROR;
+    // pick next from ready queue, fall back to idle
+    PCB_t *next;
+    if (ready_queue_head != NULL) {
+        next = ready_queue_head;
+        ready_queue_head = ready_queue_head->next;
+        next->next = NULL;
+    } else {
+        next = idle_pcb;
     }
 
+    PCB_t *old = current_process;
     current_process = next;
-    KernelContextSwitch(KCSwitchFunc, proc, current_process);
+    KernelContextSwitch(KCSwitchFunc, old, current_process);
 
-    // when we return here, the clock has switched us back
-    // current_process is already set back to proc by the clock handler
+	memcpy(uc, &current_process->usr_ctx, sizeof(UserContext));
+    uc->regs[0] = SUCCESS;  // return value for the process waking up
+
     WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
     WriteRegister(REG_PTLR1, MAX_PT_LEN);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
@@ -95,15 +101,253 @@ int sys_delay(PCB_t *proc, UserContext *uc, int ticks) {
 
 /* sys_exit terminates process and halts if is init */
 void sys_exit(PCB_t *proc, int status) {
-    TracePrintf(0, "process %d exiting with status %d\n", proc->pid, status);
-    /* the init death rule: halt if init exist */
+    TracePrintf(0, "process %d exiting status=%d\n",
+                proc->pid, status);
+
+    // init exiting halts whole system
     if (proc->pid == 1) {
-        TracePrintf(0, "init process exited: halting system\n");
+        TracePrintf(0, "init exited -- halting\n");
         Halt();
     }
+
+    // mark as zombie
+    proc->state = ZOMBIE;
+    proc->exstat = status;
+
+    // wake parent if waiting
+    if (proc->parent != NULL &&
+        proc->parent->state == WAITING) {
+
+        proc->parent->state = READY;
+
+        proc->parent->next = ready_queue_head;
+        ready_queue_head = proc->parent;
+    }
+
+    // choose next runnable process
+    PCB_t *next = ready_queue_head;
+
+    if (next != NULL) {
+        ready_queue_head = next->next;
+        next->next = NULL;
+    } else {
+        next = idle_pcb;
+    }
+
+    PCB_t *old = current_process;
+    current_process = next;
+
+    TracePrintf(0, "sys_exit: switching from pid=%d to pid=%d\n",
+                old->pid,
+                next->pid);
+
+    KernelContextSwitch(KCSwitchFunc, old, next);
+
+    // should never return
+    TracePrintf(0, "ERROR: returned from sys_exit\n");
+
     Halt();
 }
 
+int sys_fork(PCB_t *parent, UserContext *uc) {
+    // create child PCB
+    PCB_t *child = (PCB_t *)malloc(sizeof(PCB_t));
+    if (child == NULL) return ERROR;
+    memset(child, 0, sizeof(PCB_t));
+
+    // allocate child region 1 page table
+    child->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
+    if (child->r1pt == NULL) {
+        free(child);
+        return ERROR;
+    }
+    memset(child->r1pt, 0, sizeof(pte_t) * MAX_PT_LEN);
+
+    // allocate child kernel stack frames
+    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
+    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
+    for (int i = 0; i < ks_npg; i++) {
+        int f = find_free();
+        if (f == ERROR) {
+            free(child->r1pt);
+            free(child);
+            return ERROR;
+        }
+        frames[f] = 1;
+        child->kstack_pfn[i] = f;
+    }
+
+    // copy parent's region 1 page table -- copy on write would be better
+    // but for now do a full copy
+    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;  // temp mapping window
+
+    for (int i = 0; i < MAX_PT_LEN; i++) {
+        if (!parent->r1pt[i].valid) continue;
+
+        // allocate a new frame for the child
+        int f = find_free();
+        if (f == ERROR) {
+            // undo allocations
+            for (int j = 0; j < i; j++) {
+                if (child->r1pt[j].valid) {
+                    frames[child->r1pt[j].pfn] = 0;
+                    child->r1pt[j].valid = 0;
+                }
+            }
+            for (int j = 0; j < ks_npg; j++) {
+                frames[child->kstack_pfn[j]] = 0;
+            }
+            free(child->r1pt);
+            free(child);
+            return ERROR;
+        }
+        frames[f] = 1;
+
+        // map temp_vpn to the child's new frame so we can write to it
+        KernelPT[temp_vpn].valid = 1;
+        KernelPT[temp_vpn].pfn = f;
+        KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
+        WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
+
+        // copy parent page to child frame via temp mapping
+        void *parent_page = (void *)(VMEM_1_BASE + (i << PAGESHIFT));
+        void *temp_page = (void *)(temp_vpn << PAGESHIFT);
+        memcpy(temp_page, parent_page, PAGESIZE);
+
+        // set up child PTE
+        child->r1pt[i].valid = 1;
+        child->r1pt[i].pfn = f;
+        child->r1pt[i].prot = parent->r1pt[i].prot;
+    }
+
+    // unmap temp window
+    KernelPT[temp_vpn].valid = 0;
+    WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
+
+    // set up child PCB fields
+    child->pid = helper_new_pid(child->r1pt);
+    child->ppid = parent->pid;
+    child->parent = parent;
+    child->brk = parent->brk;
+    child->heap_base = parent->heap_base;
+    child->state = 0;
+    child->delay = 0;
+
+    // copy parent user context into child -- child returns 0 from fork
+    child->usr_ctx = *uc;
+    child->usr_ctx.regs[0] = 0;
+
+    // link child into parent's child list
+    child->sibling = parent->child;
+    parent->child = child;
+
+    // add child to ready queue
+    child->next = ready_queue_head;
+    ready_queue_head = child;
+	TracePrintf(0, "sys_fork: child pid=%d on ready_queue, head=%p\n", child->pid, ready_queue_head);
+    // save parent's user context
+    memcpy(&parent->usr_ctx, uc, sizeof(UserContext));
+
+	
+    // initialize child kernel context via KCSwitchFunc
+	KernelContextSwitch(KCSwitchFunc, parent, child);
+
+	for (int i = 0; i < ks_npg; i++) {
+		KernelPT[ks_base_pg + i].pfn = parent->kstack_pfn[i];
+		KernelPT[ks_base_pg + i].valid = 1;
+		KernelPT[ks_base_pg + i].prot = PROT_READ | PROT_WRITE;
+	}
+	WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
+
+	//child->init = 1;
+	current_process = parent;
+	return child->pid;
+}
+
+int sys_exec(PCB_t *proc, UserContext *uc, char *filename, char **args) {
+    // validate filename
+    if (filename == NULL) return ERROR;
+
+    // save current user context
+    memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
+
+    // LoadProgram replaces the current address space
+    int rc = LoadProgram(filename, args, proc);
+    if (rc != SUCCESS) {
+        TracePrintf(0, "sys_exec: LoadProgram failed for %s\n", filename);
+        // process is now in bad state -- kill it
+        sys_exit(proc, ERROR);
+        return ERROR;
+    }
+
+    // update uc so we return to new program
+    memcpy(uc, &proc->usr_ctx, sizeof(UserContext));
+
+    // remap region 1 to new page table
+    WriteRegister(REG_PTBR1, (unsigned int)proc->r1pt);
+    WriteRegister(REG_PTLR1, MAX_PT_LEN);
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+
+    return SUCCESS;
+}
+
+int sys_wait(PCB_t *proc, UserContext *uc, int *status_ptr) {
+    TracePrintf(0, "sys_wait: pid=%d child=%p ready_queue=%p idle=%p\n",
+        proc->pid, proc->child, ready_queue_head, idle_pcb);
+
+    if (proc->child == NULL) return ERROR;
+
+    while (1) {
+        // check for zombie children
+        PCB_t *prev = NULL;
+        PCB_t *child = proc->child;
+        while (child != NULL) {
+            if (child->state == ZOMBIE) {
+                if (status_ptr != NULL) *status_ptr = child->exstat;
+                int cpid = child->pid;
+
+                if (prev == NULL) proc->child = child->sibling;
+                else prev->sibling = child->sibling;
+
+                free_region1(child->r1pt);
+                free(child->r1pt);
+                for (int i = 0; i < KERNEL_STACK_MAXSIZE >> PAGESHIFT; i++) {
+                    frames[child->kstack_pfn[i]] = 0;
+                }
+                free(child);
+                return cpid;
+            }
+            prev = child;
+            child = child->sibling;
+        }
+
+        // no zombie yet -- block
+        proc->state = WAITING;
+        memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
+
+        PCB_t *next = ready_queue_head;
+        if (next != NULL) {
+            ready_queue_head = next->next;
+            next->next = NULL;
+        } else {
+            next = idle_pcb;
+        }
+
+        TracePrintf(0, "sys_wait: blocking pid=%d switching to next=%p idle=%p\n",
+            proc->pid, next, idle_pcb);
+
+        PCB_t *old = current_process;
+        current_process = next;
+        KernelContextSwitch(KCSwitchFunc, old, current_process);
+
+        // resumed by sys_exit waking us up
+        current_process = proc;
+        WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
+        WriteRegister(REG_PTLR1, MAX_PT_LEN);
+        WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+        // loop back to check for zombie
+    }
+}
 /*
 
 Fork

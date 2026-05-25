@@ -19,7 +19,7 @@ K_SRCS = kernel.c traps.c syscalls.c load.c
 U_SRC_DIR = .
 
 # What are the user c and include files?
-U_SRCS = idle.c init.c cp3Test.c
+U_SRCS = idle.c init.c cp3Test.c cp4Test.c simple.c
 U_INCS = 
 
 

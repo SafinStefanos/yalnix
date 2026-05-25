@@ -155,6 +155,12 @@
 #define KERNEL_STACK_BASE \
 	DOWN_TO_PAGE(KERNEL_STACK_LIMIT - KERNEL_STACK_MAXSIZE)
 
+#define READY 0
+#define RUNNING  1
+#define WAITING  2
+#define ZOMBIE   3
+#define BLOCKED  4
+
 
 /*
  * Define the structure of a page table entry.
