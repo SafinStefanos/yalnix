@@ -9,107 +9,108 @@ extern PCB_t* current_process;
 extern PCB_t* sleep_queue_head;
 
 /* thandler: handles all hardware traps and syscalls */
-void thandler(UserContext *usr_cont) {
+void thandler(usercontext *usr_cont) {
+    /* identify trap type */
     switch (usr_cont->vector) {
-        case TRAP_CLOCK:
-            /*save incoming user state */
-            memcpy(&current_process->usr_ctx, usr_cont, sizeof(UserContext));
-            /* sleep queue */
-            PCB_t *curr_sleep = sleep_queue_head;
-            PCB_t *prev_sleep = NULL;
-            while(curr_sleep != NULL){
+        case trap_clock:
+            /* save current state */
+            memcpy(&current_process->usr_ctx, usr_cont, sizeof(usercontext));
+
+            /* update sleep queue */
+            pcb_t *curr_sleep = sleep_queue_head;
+            pcb_t *prev_sleep = null;
+            while (curr_sleep != null) {
                 curr_sleep->delay--;
-                if(curr_sleep->delay <= 0){
-                    PCB_t *waking = curr_sleep; /* temp pointer to node to move */
-                    if(prev_sleep == NULL)sleep_queue_head = curr_sleep->next;
+                if (curr_sleep->delay <= 0) {
+                    pcb_t *waking = curr_sleep;
+                    if (prev_sleep == null) sleep_queue_head = curr_sleep->next;
                     else prev_sleep->next = curr_sleep->next;
-                    curr_sleep = curr_sleep->next; /*move loop to next node */
-                    
-                    /* re-enable process for scheduling */
-                    waking->state = STATE_READY;
-                    enqueue(ready_queue, &waking, sizeof(PCB_t *)); 
-                }else{
+                    curr_sleep = curr_sleep->next;
+                    /* add waking process back to ready queue */
+                    waking->state = state_ready;
+                    enqueue(ready_queue, waking, sizeof(pcb_t *));
+                } else {
                     prev_sleep = curr_sleep;
                     curr_sleep = curr_sleep->next;
                 }
             }
-            /* manage the ready queue */
-            PCB_t *old_process = current_process;
-            if (old_process->state == STATE_READY && old_process != idle_pcb) {
-                enqueue(ready_queue, &old_process, sizeof(PCB_t *)); 
-            }
-            
-            /*next process (use idle if nothing is ready) */
-            if (dequeue(ready_queue, &current_process, sizeof(PCB_t *)) == 1) {
-                current_process = idle_pcb; 
+
+            /* handle scheduling */
+            pcb_t *old_process = current_process;
+            if (old_process->state == state_ready && old_process != idle_pcb) {
+                enqueue(ready_queue, old_process, sizeof(pcb_t *));
             }
 
-            /* switch ontexts and hardware mappings */
-            KernelContextSwitch(KCSwitchFunc, old_process, current_process);
-            WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
-            WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+            /* select next process */
+            if (dequeue(ready_queue, &current_process, sizeof(pcb_t *)) == 1) {
+                current_process = idle_pcb;
+            }
 
-            /* restore hardware state for new proc*/
-            memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
+            /* context switch and hardware update */
+            kernelcontextswitch(kcswitchfunc, old_process, current_process);
+            writeregister(reg_ptbr1, (unsigned int)current_process->r1pt);
+            writeregister(reg_tlb_flush, tlb_flush_1);
+
+            /* restore state for selected process */
+            memcpy(usr_cont, &current_process->usr_ctx, sizeof(usercontext));
             break;
 
-        case TRAP_KERNEL:
-            /*syscall return values must be placed in regs*/
+        case trap_kernel:
+            /* process syscalls by code */
             switch (usr_cont->code) {
-                case YALNIX_GETPID:
+                case yalnix_getpid:
                     usr_cont->regs = current_process->pid;
                     break;
-                case YALNIX_BRK:
+                case yalnix_brk:
                     usr_cont->regs = sys_brk(current_process, (void *)usr_cont->regs);
                     break;
-                case YALNIX_DELAY:
+                case yalnix_delay:
                     usr_cont->regs = sys_delay(current_process, (int)usr_cont->regs);
                     break;
-                /* for the fork, exec, etc. syscalls */
-                case YALNIX_FORK:
+                case yalnix_fork:
                     usr_cont->regs = sys_fork(current_process);
                     break;
-                case YALNIX_EXEC:
-                    usr_cont->regs = sys_exec((char *)usr_cont->regs, (char **)usr_cont->regs[7]);
+                case yalnix_exec:
+                    usr_cont->regs = sys_exec((char *)usr_cont->regs, (char **)usr_cont->regs[2]);
                     break;
-                case YALNIX_WAIT:
+                case yalnix_wait:
                     usr_cont->regs = sys_wait((int *)usr_cont->regs);
                     break;
-                case YALNIX_EXIT:
+                case yalnix_exit:
                     sys_exit(current_process, (int)usr_cont->regs);
                     break;
                 default:
-                    usr_cont->regs = ERROR;
+                    usr_cont->regs = error;
                     break;
             }
             break;
 
-        case TRAP_MEMORY:
-            /*check for stack growth */
+        case trap_memory:
+            /* dynamic stack growth check */
             if (should_grows(usr_cont->addr)) {
-                if (grow_stack(usr_cont->addr) == SUCCESS) return;
+                if (grow_stack(usr_cont->addr) == success) return;
             }
-
-            /* if PID 1 fails, halt the whole system*/
+            /* halt if init fails */
             if (current_process->pid == 1) {
-                TracePrintf(0, "init process aborted due to memory fault\n");
-                Halt();
+                traceprintf(0, "init process memory fault\n");
+                halt();
             }
-            /*abort failing process but continue others */
-            TracePrintf(0, "Process %d aborted: memory fault at %p\n", current_process->pid, usr_cont->addr);
-            sys_exit(current_process, ERROR); 
+            /* terminate other processes on fault */
+            traceprintf(0, "pid %d memory fault at %p\n", current_process->pid, usr_cont->addr);
+            sys_exit(current_process, error);
             break;
 
-        case TRAP_MATH:
-        case TRAP_ILLEGAL:
-            /*abort process for math or illegal instructions */
-            if (current_process->pid == 1) Halt();
-            TracePrintf(0, "Process %d aborted due to trap %d\n", current_process->pid, usr_cont->vector);
-            sys_exit(current_process, ERROR);
+        case trap_math:
+        case trap_illegal:
+            /* handle fatal errors */
+            if (current_process->pid == 1) halt();
+            traceprintf(0, "pid %d aborted trap %d\n", current_process->pid, usr_cont->vector);
+            sys_exit(current_process, error);
             break;
 
-        default: 
-            Halt();
+        default:
+            /* unknown hardware event */
+            halt();
             break;
     }
 }
