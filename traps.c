@@ -56,7 +56,6 @@ void thandler(UserContext *usr_cont) {
 
                 KernelContextSwitch(KCSwitchFunc, old, current_process);
             } else if (ready_queue_head != NULL && current_process == idle_pcb) {
-                // idle is running but someone is ready -- switch immediately
                 PCB_t *old = current_process;
                 current_process = ready_queue_head;
                 ready_queue_head = ready_queue_head->next;
@@ -64,7 +63,6 @@ void thandler(UserContext *usr_cont) {
 
                 KernelContextSwitch(KCSwitchFunc, old, current_process);
             }
-            // else: nothing ready, keep running current process (or idle)
 
             WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
             WriteRegister(REG_PTLR1, MAX_PT_LEN);
