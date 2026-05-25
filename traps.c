@@ -6,7 +6,7 @@
 #include <syscalls.h>
 
 extern PCB_t* current_process;
-extern PCB_t* sleep_queue_head;
+extern PCB_t* sleep_queue;
 
 /* thandler: handles all hardware traps and syscalls */
 void thandler(usercontext *usr_cont) {
