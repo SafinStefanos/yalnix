@@ -44,6 +44,7 @@ int sys_brk(PCB_t *proc, void *addr) {
             int f = find_free();
             if (f == ERROR) return ERROR;
             frames[f] = 1;
+            //TracePrintf(0, "ALLOC frame %d at %s:%d\n", f, __FILE__, __LINE__);
             proc->r1pt[i].valid = 1;
             proc->r1pt[i].pfn = f;
             proc->r1pt[i].prot = PROT_READ | PROT_WRITE;
@@ -53,6 +54,7 @@ int sys_brk(PCB_t *proc, void *addr) {
         for (int i = new_vpn; i < cur_vpn; i++) {
             if (proc->r1pt[i].valid) {
                 frames[proc->r1pt[i].pfn] = 0;
+                //TracePrintf(0, "FREE frame %d at %s:%d\n", proc->r1pt[i].pfn, __FILE__, __LINE__);
                 proc->r1pt[i].valid = 0;
             }
         }
@@ -174,9 +176,12 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
             return ERROR;
         }
         frames[f] = 1;
+        //TracePrintf(0, "ALLOC frame %d at %s:%d\n", f, __FILE__, __LINE__);
         child->kstack_pfn[i] = f;
     }
 
+    // copy parent's region 1 page table -- copy on write would be better
+    // but for now do a full copy
     int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;  // temp mapping window
 
     for (int i = 0; i < MAX_PT_LEN; i++) {
@@ -189,17 +194,20 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
             for (int j = 0; j < i; j++) {
                 if (child->r1pt[j].valid) {
                     frames[child->r1pt[j].pfn] = 0;
+                    //TracePrintf(0, "FREE frame %d at %s:%d\n", child->r1pt[j].pfn, __FILE__, __LINE__);
                     child->r1pt[j].valid = 0;
                 }
             }
             for (int j = 0; j < ks_npg; j++) {
                 frames[child->kstack_pfn[j]] = 0;
+                //TracePrintf(0, "FREE frame %d at %s:%d\n", child->kstack_pfn[j], __FILE__, __LINE__);
             }
             free(child->r1pt);
             free(child);
             return ERROR;
         }
         frames[f] = 1;
+        //TracePrintf(0, "ALLOC frame %d at %s:%d\n", f, __FILE__, __LINE__);
 
         // map temp_vpn to the child's new frame so we can write to it
         KernelPT[temp_vpn].valid = 1;
@@ -311,6 +319,7 @@ int sys_wait(PCB_t *proc, UserContext *uc, int *status_ptr) {
                 free(child->r1pt);
                 for (int i = 0; i < KERNEL_STACK_MAXSIZE >> PAGESHIFT; i++) {
                     frames[child->kstack_pfn[i]] = 0;
+                    //TracePrintf(0, "FREE frame %d at %s:%d\n", child->kstack_pfn[i], __FILE__, __LINE__);
                 }
                 free(child);
                 return cpid;
@@ -318,6 +327,8 @@ int sys_wait(PCB_t *proc, UserContext *uc, int *status_ptr) {
             prev = child;
             child = child->sibling;
         }
+
+        // no zombie yet -- block
         proc->state = WAITING;
         memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
 
@@ -344,6 +355,139 @@ int sys_wait(PCB_t *proc, UserContext *uc, int *status_ptr) {
         // loop back to check for zombie
     }
 }
+
+int sys_tty_write(PCB_t *proc, UserContext *uc, int tty_id, void *buf, int len) {
+    if (tty_id < 0 || tty_id >= NUM_TERMINALS) return ERROR;
+    if (len <= 0) return 0;
+    if (buf == NULL) return ERROR;
+
+    // wait if terminal already busy
+    while (tty_busy[tty_id]) {
+        memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
+        proc->state = BLOCKED;
+        PCB_t *next = (ready_queue_head != NULL) ? ready_queue_head : idle_pcb;
+        if (ready_queue_head != NULL) {
+            ready_queue_head = ready_queue_head->next;
+            next->next = NULL;
+        }
+        PCB_t *old = current_process;
+        current_process = next;
+        KernelContextSwitch(KCSwitchFunc, old, current_process);
+        current_process = proc;
+        WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
+        WriteRegister(REG_PTLR1, MAX_PT_LEN);
+        WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+        memcpy(uc, &current_process->usr_ctx, sizeof(UserContext));
+    }
+
+    char *kbuf = (char *)malloc(len);
+    if (kbuf == NULL) return ERROR;
+    memcpy(kbuf, buf, len);
+
+    TtyWriteReq_t *req = (TtyWriteReq_t *)malloc(sizeof(TtyWriteReq_t));
+    if (req == NULL) { free(kbuf); return ERROR; }
+    req->proc = proc;
+    req->buf  = kbuf;
+    req->len  = len;
+    req->sent = 0;
+
+    tty_write_req[tty_id] = req;
+    tty_busy[tty_id] = 1;
+
+    int chunk = (len > TERMINAL_MAX_LINE) ? TERMINAL_MAX_LINE : len;
+    TtyTransmit(tty_id, kbuf, chunk);
+
+    // block until transmit completes
+    memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
+    proc->state = BLOCKED;
+
+    PCB_t *next = (ready_queue_head != NULL) ? ready_queue_head : idle_pcb;
+    if (ready_queue_head != NULL) {
+        ready_queue_head = ready_queue_head->next;
+        next->next = NULL;
+    }
+
+    PCB_t *old = current_process;
+    current_process = next;
+    KernelContextSwitch(KCSwitchFunc, old, current_process);
+
+    current_process = proc;
+    WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
+    WriteRegister(REG_PTLR1, MAX_PT_LEN);
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+    memcpy(uc, &current_process->usr_ctx, sizeof(UserContext));
+    uc->regs[0] = len;
+    return len;
+}
+
+int sys_tty_read(PCB_t *proc, UserContext *uc, int tty_id, void *buf, int len) {
+    if (tty_id < 0 || tty_id >= NUM_TERMINALS) return ERROR;
+    if (len <= 0) return 0;
+    if (buf == NULL) return ERROR;
+
+    // if data already buffered, serve immediately
+    if (tty_read_len[tty_id] > 0) {
+        int n = (len < tty_read_len[tty_id]) ? len : tty_read_len[tty_id];
+        memcpy(buf, tty_read_buf[tty_id], n);
+        // shift remaining data
+        int remaining = tty_read_len[tty_id] - n;
+        if (remaining > 0)
+            memmove(tty_read_buf[tty_id], tty_read_buf[tty_id] + n, remaining);
+        tty_read_len[tty_id] = remaining;
+        return n;
+    }
+
+    // no data yet -- build read request and block
+    TtyReadReq_t *req = (TtyReadReq_t *)malloc(sizeof(TtyReadReq_t));
+    if (req == NULL) return ERROR;
+    char *kbuf = (char *)malloc(len);
+    if (kbuf == NULL) { free(req); return ERROR; }
+
+    req->proc     = proc;
+    req->buf      = kbuf;
+    req->len      = len;
+    req->received = 0;
+    req->next     = NULL;
+
+    // enqueue at back of read queue for this terminal
+    if (tty_read_queue[tty_id] == NULL) {
+        tty_read_queue[tty_id] = req;
+    } else {
+        TtyReadReq_t *tail = tty_read_queue[tty_id];
+        while (tail->next != NULL) tail = tail->next;
+        tail->next = req;
+    }
+
+    // block caller
+    memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
+    proc->state = BLOCKED;
+
+    PCB_t *next = (ready_queue_head != NULL) ? ready_queue_head : idle_pcb;
+    if (ready_queue_head != NULL) {
+        ready_queue_head = ready_queue_head->next;
+        next->next = NULL;
+    }
+    PCB_t *old = current_process;
+    current_process = next;
+    KernelContextSwitch(KCSwitchFunc, old, current_process);
+    
+    // resumed by TRAP_TTY_RECEIVE handler
+    current_process = proc;
+    WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
+    WriteRegister(REG_PTLR1, MAX_PT_LEN);
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+
+    // copy from kernel buffer to user buffer
+    int n = req->received;
+    memcpy(buf, req->buf, n);
+    free(req->buf);
+    free(req);
+
+    memcpy(uc, &current_process->usr_ctx, sizeof(UserContext));
+    uc->regs[0] = n;
+    return n;
+}
+
 /*
 
 Fork

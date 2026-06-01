@@ -8,7 +8,30 @@
 #include <ykernel.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <struct_helpers.h>
+
+// TTY state
+typedef struct tty_write_req {
+    PCB_t *proc;
+    char *buf;        // kernel buffer copy
+    int len;          // total bytes to write
+    int sent;         // bytes sent so far
+} TtyWriteReq_t;
+
+typedef struct tty_read_req {
+    PCB_t *proc;
+    char *buf;        // kernel buffer to fill
+    int len;          // bytes requested
+    int received;     // bytes received so far
+    struct tty_read_req *next;
+} TtyReadReq_t;
+
+extern TtyWriteReq_t *tty_write_req[NUM_TERMINALS];
+extern TtyReadReq_t  *tty_read_queue[NUM_TERMINALS];
+extern char           tty_read_buf[NUM_TERMINALS][TERMINAL_MAX_LINE];
+extern int            tty_read_len[NUM_TERMINALS];
+extern int            tty_busy[NUM_TERMINALS];
+
+
 
 
 /* Kernel global variables (extern so other files can access) */

@@ -24,5 +24,8 @@ void sys_exit(PCB_t *proc, int status);
 int sys_fork(PCB_t *parent, UserContext *uc);
 int sys_exec(PCB_t *proc, UserContext *uc, char *filename, char **args);
 int sys_wait(PCB_t *proc, UserContext *uc, int *status_ptr);
+int sys_tty_write(PCB_t *proc, UserContext *uc, int tty_id, void *buf, int len);
+int sys_tty_read(PCB_t *proc, UserContext *uc, int tty_id, void *buf, int len);
+
 
 #endif /* _syscalls_h */
