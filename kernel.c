@@ -109,44 +109,6 @@ KernelContext *KCSInitFunc(KernelContext *kc_in, void *pcb_v, void *unused){
     return kc_in;
 }
 
-/* kccopyfunc: clones the current kernel stack using a temporary mapping */
-/*
-KernelContext *KCCopyFunc(KernelContext *kc_in, void *new_pcb_v, void *unused) {
-    PCB_t *new_pcb = (PCB_t *)new_pcb_v;
-
-    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
-    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
-    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
-
-    // copy each kernel stack page into child's frames via temp mapping
-    for (int i = 0; i < ks_npg; i++) {
-        KernelPT[temp_vpn].pfn = new_pcb->kstack_pfn[i];
-        KernelPT[temp_vpn].valid = 1;
-        KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
-        WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
-
-        memcpy((void *)(temp_vpn << PAGESHIFT),
-               (void *)((ks_base_pg + i) << PAGESHIFT), PAGESIZE);
-    }
-
-    // unmap temp window
-    KernelPT[temp_vpn].valid = 0;
-    WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
-
-    // remap kernel stack to child's frames
-    for (int i = 0; i < ks_npg; i++) {
-        KernelPT[ks_base_pg + i].pfn = new_pcb->kstack_pfn[i];
-        KernelPT[ks_base_pg + i].valid = 1;
-        KernelPT[ks_base_pg + i].prot = PROT_READ | PROT_WRITE;
-    }
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
-
-    // save context into child NOW, after stack is remapped, so SP matches
-    new_pcb->krn_ctx = *kc_in;
-
-    return kc_in;
-} */
-
 KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v){
     PCB_t *curr = (PCB_t *)curr_pcb_v;
     PCB_t *next = (PCB_t *)next_pcb_v;
@@ -257,7 +219,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         KernelPT[i].prot = PROT_READ | PROT_WRITE;
     }
 
-    // Map kernel stack pages -- these belong to init (first process to run)
+    // Map kernel stack pages 
     int kstack_pfns[2] = {0x7e, 0x7f};
     int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
     int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
@@ -284,7 +246,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         tty_read_len[i] = 0;
         tty_busy[i] = 0;
     }
-    // ---- Create init PCB ----
+    // Create init PCB 
     init_pcb = (PCB_t *)malloc(sizeof(PCB_t));
     memset(init_pcb, 0, sizeof(PCB_t));
     init_pcb->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
@@ -294,7 +256,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         init_pcb->kstack_pfn[i] = kstack_pfns[i];
     }
 
-    // ---- Create idle PCB ----
+    // Create idle PCB
     idle_pcb = (PCB_t *)malloc(sizeof(PCB_t));
     memset(idle_pcb, 0, sizeof(PCB_t));
     idle_pcb->r1pt = (pte_t *)malloc(sizeof(pte_t) * MAX_PT_LEN);
