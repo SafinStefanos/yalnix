@@ -10,6 +10,7 @@
 
 extern PCB_t *idle_pcb;
 extern KernelContext *KCSwitchFunc();
+extern KernelContext *KCCopyFunc();
 
 /* sys_brk adjusts user heap with red zone and collision checks */
 int sys_brk(PCB_t *proc, void *addr) {
@@ -152,6 +153,10 @@ void sys_exit(PCB_t *proc, int status) {
 }
 
 int sys_fork(PCB_t *parent, UserContext *uc) {
+    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
+    int ks_npg     = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
+    int temp_vpn   = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
+
     // create child PCB
     PCB_t *child = (PCB_t *)malloc(sizeof(PCB_t));
     if (child == NULL) return ERROR;
@@ -166,8 +171,6 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
     memset(child->r1pt, 0, sizeof(pte_t) * MAX_PT_LEN);
 
     // allocate child kernel stack frames
-    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
-    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
     for (int i = 0; i < ks_npg; i++) {
         int f = find_free();
         if (f == ERROR) {
@@ -176,54 +179,43 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
             return ERROR;
         }
         frames[f] = 1;
-        //TracePrintf(0, "ALLOC frame %d at %s:%d\n", f, __FILE__, __LINE__);
         child->kstack_pfn[i] = f;
     }
 
-    // copy parent's region 1 page table -- copy on write would be better
-    // but for now do a full copy
-    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;  // temp mapping window
-
+    // copy parent's region 1 pages into child
     for (int i = 0; i < MAX_PT_LEN; i++) {
         if (!parent->r1pt[i].valid) continue;
 
-        // allocate a new frame for the child
         int f = find_free();
         if (f == ERROR) {
             // undo allocations
             for (int j = 0; j < i; j++) {
                 if (child->r1pt[j].valid) {
                     frames[child->r1pt[j].pfn] = 0;
-                    //TracePrintf(0, "FREE frame %d at %s:%d\n", child->r1pt[j].pfn, __FILE__, __LINE__);
                     child->r1pt[j].valid = 0;
                 }
             }
-            for (int j = 0; j < ks_npg; j++) {
-                frames[child->kstack_pfn[j]] = 0;
-                //TracePrintf(0, "FREE frame %d at %s:%d\n", child->kstack_pfn[j], __FILE__, __LINE__);
-            }
+            for (int j = 0; j < ks_npg; j++) frames[child->kstack_pfn[j]] = 0;
             free(child->r1pt);
             free(child);
             return ERROR;
         }
         frames[f] = 1;
-        //TracePrintf(0, "ALLOC frame %d at %s:%d\n", f, __FILE__, __LINE__);
 
-        // map temp_vpn to the child's new frame so we can write to it
+        // map temp_vpn to child's new frame
         KernelPT[temp_vpn].valid = 1;
-        KernelPT[temp_vpn].pfn = f;
-        KernelPT[temp_vpn].prot = PROT_READ | PROT_WRITE;
+        KernelPT[temp_vpn].pfn   = f;
+        KernelPT[temp_vpn].prot  = PROT_READ | PROT_WRITE;
         WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
 
-        // copy parent page to child frame via temp mapping
+        // copy parent page into child frame
         void *parent_page = (void *)(VMEM_1_BASE + (i << PAGESHIFT));
-        void *temp_page = (void *)(temp_vpn << PAGESHIFT);
+        void *temp_page   = (void *)(temp_vpn << PAGESHIFT);
         memcpy(temp_page, parent_page, PAGESIZE);
 
-        // set up child PTE
         child->r1pt[i].valid = 1;
-        child->r1pt[i].pfn = f;
-        child->r1pt[i].prot = parent->r1pt[i].prot;
+        child->r1pt[i].pfn   = f;
+        child->r1pt[i].prot  = parent->r1pt[i].prot;
     }
 
     // unmap temp window
@@ -231,43 +223,41 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
     WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
 
     // set up child PCB fields
-    child->pid = helper_new_pid(child->r1pt);
-    child->ppid = parent->pid;
-    child->parent = parent;
-    child->brk = parent->brk;
+    child->pid       = helper_new_pid(child->r1pt);
+    child->ppid      = parent->pid;
+    child->parent    = parent;
+    child->brk       = parent->brk;
     child->heap_base = parent->heap_base;
-    child->state = 0;
-    child->delay = 0;
+    child->state     = READY;
+    child->delay     = 0;
+    child->init      = 0;  // KCCopyFunc will set this to 1
 
-    // copy parent user context into child -- child returns 0 from fork
-    child->usr_ctx = *uc;
+    // child returns 0 from fork
+    child->usr_ctx         = *uc;
     child->usr_ctx.regs[0] = 0;
 
     // link child into parent's child list
     child->sibling = parent->child;
-    parent->child = child;
+    parent->child  = child;
 
-    // add child to ready queue
-    child->next = ready_queue_head;
-    ready_queue_head = child;
-	TracePrintf(0, "sys_fork: child pid=%d on ready_queue, head=%p\n", child->pid, ready_queue_head);
     // save parent's user context
     memcpy(&parent->usr_ctx, uc, sizeof(UserContext));
 
-	
-    // initialize child kernel context via KCSwitchFunc
-	KernelContextSwitch(KCSwitchFunc, parent, child);
+    // add child to ready queue
+    child->next        = ready_queue_head;
+    ready_queue_head   = child;
+    TracePrintf(0, "sys_fork: child pid=%d\n", child->pid);
 
-	for (int i = 0; i < ks_npg; i++) {
-		KernelPT[ks_base_pg + i].pfn = parent->kstack_pfn[i];
-		KernelPT[ks_base_pg + i].valid = 1;
-		KernelPT[ks_base_pg + i].prot = PROT_READ | PROT_WRITE;
-	}
-	WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
+    // copy parent kstack into child's frames and save child's kernel context
+    // KCCopyFunc does everything atomically and returns kc_in so we stay as parent
+    KernelContextSwitch(KCCopyFunc, child, NULL);
 
-	//child->init = 1;
-	current_process = parent;
-	return child->pid;
+    if (current_process == child) {
+        return 0;
+    }
+    // if we get here we are the parent -- child is on ready queue
+  //  current_process = parent;
+    return child->pid;
 }
 
 int sys_exec(PCB_t *proc, UserContext *uc, char *filename, char **args) {

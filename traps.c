@@ -204,8 +204,7 @@ void thandler(UserContext *usr_cont) {
 
             // Must be in region 1
             if (addr < VMEM_1_BASE || addr >= VMEM_1_LIMIT) {
-                TracePrintf(0, "TRAP_MEMORY: pid=%d addr=%p out of region 1 -- killing\n",
-                            current_process->pid, fault_addr);
+                TracePrintf(0, "TRAP_MEMORY: pid=%d addr=%p out of region 1, killing\n", current_process->pid, fault_addr);
                 if (current_process->pid == 1) Halt();
                 sys_exit(current_process, ERROR);
                 memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
@@ -273,6 +272,7 @@ void thandler(UserContext *usr_cont) {
             // hardware retries the faulting instruction automatically
             break;
         }
+        
         case TRAP_DISK:
             TracePrintf(0, "TRAP_DISK: unexpected disk interrupt (not implemented)\n");
             break;
