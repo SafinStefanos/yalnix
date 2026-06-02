@@ -8,8 +8,11 @@
 #include <kern.h>
 #include <load.h>
 
+extern PCB_t *init_pcb;
 extern PCB_t *idle_pcb;
 extern KernelContext *KCSwitchFunc();
+extern KernelContext *KCCopy();
+extern KernelContext *KCSSaveAndIdle(KernelContext *kc_in, void *proc_v, void *unused);
 
 /* sys_brk adjusts user heap with red zone and collision checks */
 int sys_brk(PCB_t *proc, void *addr) {
@@ -65,19 +68,16 @@ int sys_brk(PCB_t *proc, void *addr) {
     return SUCCESS;
 }
 
-/* sys_delay validates input and moves process to sleep queue */
+
 int sys_delay(PCB_t *proc, UserContext *uc, int ticks) {
     if (ticks == 0) return SUCCESS;
     if (ticks < 0) return ERROR;
-
     memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
     proc->delay = ticks;
 
-    // add to sleep queue
     proc->next = sleep_queue_head;
     sleep_queue_head = proc;
 
-    // pick next from ready queue, fall back to idle
     PCB_t *next;
     if (ready_queue_head != NULL) {
         next = ready_queue_head;
@@ -89,15 +89,40 @@ int sys_delay(PCB_t *proc, UserContext *uc, int ticks) {
 
     PCB_t *old = current_process;
     current_process = next;
+
+    if (next == idle_pcb) {
+        KernelContextSwitch(KCSSaveAndIdle, proc, NULL);
+
+        if (current_process == idle_pcb) {
+            int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
+            int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
+            for (int i = 0; i < ks_npg; i++) {
+                KernelPT[ks_base_pg + i].pfn = idle_pcb->kstack_pfn[i];
+                KernelPT[ks_base_pg + i].valid = 1;
+                KernelPT[ks_base_pg + i].prot = PROT_READ | PROT_WRITE;
+            }
+            WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
+            WriteRegister(REG_PTBR1, (unsigned int)idle_pcb->r1pt);
+            WriteRegister(REG_PTLR1, MAX_PT_LEN);
+            WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+            memcpy(uc, &idle_pcb->usr_ctx, sizeof(UserContext));
+        } else {
+            memcpy(uc, &current_process->usr_ctx, sizeof(UserContext));
+            uc->regs[0] = SUCCESS;
+            WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
+            WriteRegister(REG_PTLR1, MAX_PT_LEN);
+            WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+        }
+        return SUCCESS;
+    }
+
     KernelContextSwitch(KCSwitchFunc, old, current_process);
 
-	memcpy(uc, &current_process->usr_ctx, sizeof(UserContext));
-    uc->regs[0] = SUCCESS;  // return value for the process waking up
-
+    memcpy(uc, &current_process->usr_ctx, sizeof(UserContext));
+    uc->regs[0] = SUCCESS;
     WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
     WriteRegister(REG_PTLR1, MAX_PT_LEN);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
-
     return SUCCESS;
 }
 
@@ -107,7 +132,7 @@ void sys_exit(PCB_t *proc, int status) {
                 proc->pid, status);
 
     // init exiting halts whole system
-    if (proc->pid == 1) {
+    if (proc == init_pcb) {
         TracePrintf(0, "init exited -- halting\n");
         Halt();
     }
@@ -221,6 +246,7 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
         memcpy(temp_page, parent_page, PAGESIZE);
 
         // set up child PTE
+        TracePrintf(0, "copying vpn=%d pfn=%d prot=%d\n", i, f, parent->r1pt[i].prot);
         child->r1pt[i].valid = 1;
         child->r1pt[i].pfn = f;
         child->r1pt[i].prot = parent->r1pt[i].prot;
@@ -247,6 +273,7 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
     child->sibling = parent->child;
     parent->child = child;
 
+    TracePrintf(0, "sys_fork: adding child pid=%d to ready queue\n", child->pid);
     // add child to ready queue
     child->next = ready_queue_head;
     ready_queue_head = child;
@@ -256,7 +283,12 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
 
 	
     // initialize child kernel context via KCSwitchFunc
-	KernelContextSwitch(KCSwitchFunc, parent, child);
+	KernelContextSwitch(KCCopy, parent, child);
+
+    if (current_process != parent) {
+        // child
+        return 0;
+        }
 
 	for (int i = 0; i < ks_npg; i++) {
 		KernelPT[ks_base_pg + i].pfn = parent->kstack_pfn[i];
@@ -298,61 +330,97 @@ int sys_exec(PCB_t *proc, UserContext *uc, char *filename, char **args) {
 }
 
 int sys_wait(PCB_t *proc, UserContext *uc, int *status_ptr) {
-    TracePrintf(0, "sys_wait: pid=%d child=%p ready_queue=%p idle=%p\n",
+    TracePrintf(0,
+        "sys_wait: pid=%d child=%p ready_queue=%p idle=%p\n",
         proc->pid, proc->child, ready_queue_head, idle_pcb);
 
-    if (proc->child == NULL) return ERROR;
+    if (proc->child == NULL) {
+        return ERROR;
+    }
 
     while (1) {
-        // check for zombie children
+
+        // zomb check
+
         PCB_t *prev = NULL;
         PCB_t *child = proc->child;
+
         while (child != NULL) {
             if (child->state == ZOMBIE) {
-                if (status_ptr != NULL) *status_ptr = child->exstat;
+
+                if (status_ptr != NULL) {
+                    *status_ptr = child->exstat;
+                }
+
                 int cpid = child->pid;
 
-                if (prev == NULL) proc->child = child->sibling;
-                else prev->sibling = child->sibling;
+                // unlink child from sibling list
+                if (prev == NULL) {
+                    proc->child = child->sibling;
+                } else {
+                    prev->sibling = child->sibling;
+                }
 
+                // free resources
                 free_region1(child->r1pt);
                 free(child->r1pt);
-                for (int i = 0; i < KERNEL_STACK_MAXSIZE >> PAGESHIFT; i++) {
+
+                for (int i = 0; i < (KERNEL_STACK_MAXSIZE >> PAGESHIFT); i++) {
                     frames[child->kstack_pfn[i]] = 0;
-                    //TracePrintf(0, "FREE frame %d at %s:%d\n", child->kstack_pfn[i], __FILE__, __LINE__);
                 }
+
                 free(child);
                 return cpid;
             }
+
             prev = child;
             child = child->sibling;
         }
 
-        // no zombie yet -- block
+        // no zombie found → block current process
         proc->state = WAITING;
+
+        // save user context so we resume correctly later
         memcpy(&proc->usr_ctx, uc, sizeof(UserContext));
 
-        PCB_t *next = ready_queue_head;
-        if (next != NULL) {
-            ready_queue_head = next->next;
+        // next proc
+        PCB_t *next = NULL;
+
+        if (ready_queue_head != NULL) {
+            next = ready_queue_head;
+            ready_queue_head = ready_queue_head->next;
             next->next = NULL;
-        } else {
+        }
+
+        if (next == NULL) {
+            next = idle_pcb;
+        }
+        // prevent self-switch
+        if (next == proc) {
             next = idle_pcb;
         }
 
-        TracePrintf(0, "sys_wait: blocking pid=%d switching to next=%p idle=%p\n",
+        TracePrintf(0,
+            "sys_wait: blocking pid=%d switching to next=%p idle=%p\n",
             proc->pid, next, idle_pcb);
 
+        //context switch
         PCB_t *old = current_process;
+
         current_process = next;
+
+        WriteRegister(REG_PTBR1, (unsigned int)next->r1pt);
+        WriteRegister(REG_PTLR1, MAX_PT_LEN);
+        WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+
         KernelContextSwitch(KCSwitchFunc, old, current_process);
 
-        // resumed by sys_exit waking us up
-        current_process = proc;
+        //restore the page table
         WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
         WriteRegister(REG_PTLR1, MAX_PT_LEN);
         WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
-        // loop back to check for zombie
+        memcpy(uc, &current_process->usr_ctx, sizeof(UserContext));
+        // loop back to check zombies again
     }
 }
 
@@ -437,7 +505,7 @@ int sys_tty_read(PCB_t *proc, UserContext *uc, int tty_id, void *buf, int len) {
         return n;
     }
 
-    // no data yet -- build read request and block
+    // build read request and block
     TtyReadReq_t *req = (TtyReadReq_t *)malloc(sizeof(TtyReadReq_t));
     if (req == NULL) return ERROR;
     char *kbuf = (char *)malloc(len);
@@ -687,4 +755,6 @@ int sys_brk(PCB_t *proc, void *addr) {
 int sys_getpid(PCB_t *proc) {
     return proc->pid;
 }
+
+
 
