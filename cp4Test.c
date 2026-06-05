@@ -93,7 +93,6 @@ void test_fork_parent_child() {
 void test_wait_basic() {
     TracePrintf(0, "\n[TEST] Wait Basic\n");
     int rc = Fork();
-
     if (rc == 0) {
         TracePrintf(0, "  Child: delaying 3 ticks\n");
         Delay(3);
@@ -105,11 +104,10 @@ void test_wait_basic() {
         int status;
         int wpid = Wait(&status);
         TracePrintf(0, "  Parent: Wait returned pid=%d status=%d\n", wpid, status);
-        if (wpid == child_pid && status == 0) {
+        if (wpid == child_pid && status == 0)
             TracePrintf(0, "  PASS: correct pid and status\n");
-        } else {
+        else
             TracePrintf(0, "  FAIL: expected pid=%d status=0\n", child_pid);
-        }
     } else {
         TracePrintf(0, "  FAIL: Fork returned ERROR\n");
     }

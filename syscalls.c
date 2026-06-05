@@ -118,13 +118,17 @@ void sys_exit(PCB_t *proc, int status) {
     proc->exstat = status;
 
     // wake parent if waiting
-    if (proc->parent != NULL &&
-        proc->parent->state == WAITING) {
-
+    if (proc->parent != NULL && proc->parent->state == WAITING) {
         proc->parent->state = READY;
-
-        proc->parent->next = ready_queue_head;
-        ready_queue_head = proc->parent;
+        proc->parent->next = NULL;
+        // append to back
+        if (ready_queue_head == NULL) {
+            ready_queue_head = proc->parent;
+        } else {
+            PCB_t *tail = ready_queue_head;
+            while (tail->next != NULL) tail = tail->next;
+            tail->next = proc->parent;
+        }
     }
 
     // choose next runnable process
@@ -338,7 +342,7 @@ int sys_wait(PCB_t *proc, UserContext *uc, int *status_ptr) {
         KernelContextSwitch(KCSwitchFunc, old, current_process);
 
         // resumed by sys_exit waking us up
-        current_process = proc;
+        //current_process = proc;
         WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
         WriteRegister(REG_PTLR1, MAX_PT_LEN);
         WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
