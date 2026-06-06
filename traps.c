@@ -4,6 +4,7 @@
 #include <ykernel.h>
 #include <kern.h>
 #include <syscalls.h>
+#include "sync.c"
 
 extern PCB_t* current_process;
 extern PCB_t* sleep_queue_head;
