@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <load.h>
 #include <kern.h>
+#include "sync.c"
 
 
 unsigned char frames[MAX_PMEM_SIZE/PAGESIZE];
