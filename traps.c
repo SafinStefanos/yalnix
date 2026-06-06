@@ -276,6 +276,49 @@ void thandler(UserContext *usr_cont) {
         case TRAP_DISK:
             TracePrintf(0, "TRAP_DISK: unexpected disk interrupt (not implemented)\n");
             break;
+        case YALNIX_LOCK_INIT:
+            usr_cont->regs[0] = sys_lock_init((int *)usr_cont->regs[0]);
+            break;
+ 
+        case YALNIX_ACQUIRE:
+            usr_cont->regs[0] = sys_acquire(current_process, usr_cont, (int)usr_cont->regs[0]);
+            break;
+ 
+        case YALNIX_RELEASE:
+            usr_cont->regs[0] = sys_release(current_process, (int)usr_cont->regs[0]);
+            break;
+ 
+        case YALNIX_CVAR_INIT:
+            usr_cont->regs[0] = sys_cvar_init((int *)usr_cont->regs[0]);
+            break;
+ 
+        case YALNIX_CVAR_SIGNAL:
+            usr_cont->regs[0] = sys_cvar_signal((int)usr_cont->regs[0]);
+            break;
+ 
+        case YALNIX_CVAR_BROADCAST:
+            usr_cont->regs[0] = sys_cvar_broadcast((int)usr_cont->regs[0]);
+            break;
+ 
+        case YALNIX_CVAR_WAIT:
+            usr_cont->regs[0] = sys_cvar_wait(current_process, usr_cont, (int)usr_cont->regs[0], (int)usr_cont->regs[1]);
+            break;
+ 
+        case YALNIX_PIPE_INIT:
+            usr_cont->regs[0] = sys_pipe_init((int *)usr_cont->regs[0]);
+            break;
+ 
+        case YALNIX_PIPE_READ:
+            usr_cont->regs[0] = sys_pipe_read(current_process, usr_cont, (int)usr_cont->regs[0], (void *)usr_cont->regs[1], (int)usr_cont->regs[2]);
+            break;
+ 
+        case YALNIX_PIPE_WRITE:
+            usr_cont->regs[0] = sys_pipe_write(current_process, usr_cont, (int)usr_cont->regs[0], (void *)usr_cont->regs[1], (int)usr_cont->regs[2]);
+            break;
+ 
+        case YALNIX_RECLAIM:
+            usr_cont->regs[0] = sys_reclaim((int)usr_cont->regs[0]);
+            break;
         default: 
             /* halt on math or illegal instruction traps for now */
             Halt();
