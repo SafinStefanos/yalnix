@@ -230,6 +230,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
         tty_read_len[i]   = 0;
         tty_busy[i]       = 0;
     }
+	sync_init();
 
     //  create init PCB 
     init_pcb = (PCB_t *)malloc(sizeof(PCB_t));
