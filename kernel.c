@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <load.h>
 #include <kern.h>
-#include "sync.c"
+#include "sync.h"
 
 
 unsigned char frames[MAX_PMEM_SIZE/PAGESIZE];
@@ -321,6 +321,21 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     KernelContextSwitch(KCSInitFunc, init_pcb, NULL);
     init_pcb->init = 1;
 
+    int temp_vpn = (KERNEL_STACK_BASE >> PAGESHIFT) - 1;
+
+    for (i = 0; i < ks_npg; i++) {
+
+        KernelPT[temp_vpn].pfn   = idle_pcb->kstack_pfn[i];
+        KernelPT[temp_vpn].valid = 1;
+        KernelPT[temp_vpn].prot  = PROT_READ | PROT_WRITE;
+
+        WriteRegister(REG_TLB_FLUSH, (unsigned int)(temp_vpn << PAGESHIFT));
+
+    memcpy((void *)(temp_vpn << PAGESHIFT), (void *)((ks_base_pg + i) << PAGESHIFT), PAGESIZE);
+    }
+
+    KernelPT[temp_vpn].valid = 0;
+    WriteRegister(REG_TLB_FLUSH,(unsigned int)(temp_vpn << PAGESHIFT));
     // save idle's kernel context 
     // must remap the kstack PTEs to idle's frames before calling KCSInitFunc
     // so that the saved SP in idle->krn_ctx matches idle's physical frames
@@ -334,7 +349,6 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     WriteRegister(REG_PTBR1, (unsigned int)idle_pcb->r1pt);
     WriteRegister(REG_PTLR1, MAX_PT_LEN);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
-
     KernelContextSwitch(KCSInitFunc, idle_pcb, NULL);
     idle_pcb->init = 1;
 
