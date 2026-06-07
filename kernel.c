@@ -351,6 +351,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
     KernelContextSwitch(KCSInitFunc, idle_pcb, NULL);
     idle_pcb->init = 1;
+    TracePrintf(0, "IDLE INIT: krn_ctx=%p stack0=%d stack1=%d\n", &idle_pcb->krn_ctx, idle_pcb->kstack_pfn[0], idle_pcb->kstack_pfn[1]);
 
     // restore init's kstack before returning to userland
     for (i = 0; i < ks_npg; i++) {
@@ -423,4 +424,5 @@ int SetKernelBrk(void *addr){
 	
     return SUCCESS; 
 }
+
 
