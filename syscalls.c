@@ -103,25 +103,20 @@ int sys_delay(PCB_t *proc, UserContext *uc, int ticks) {
 }
 
 /* sys_exit terminates process and halts if is init */
-void sys_exit(PCB_t *proc, int status) {
-    TracePrintf(0, "process %d exiting status=%d\n",
-                proc->pid, status);
+void sys_exit(PCB_t *proc, UserContext *uc, int status) {
+    TracePrintf(0, "process %d exiting status=%d\n", proc->pid, status);
 
-    // init exiting halts whole system
     if (proc->pid == 1) {
         TracePrintf(0, "init exited -- halting\n");
         Halt();
     }
 
-    // mark as zombie
     proc->state = ZOMBIE;
     proc->exstat = status;
 
-    // wake parent if waiting
     if (proc->parent != NULL && proc->parent->state == WAITING) {
         proc->parent->state = READY;
         proc->parent->next = NULL;
-        // append to back
         if (ready_queue_head == NULL) {
             ready_queue_head = proc->parent;
         } else {
@@ -131,9 +126,7 @@ void sys_exit(PCB_t *proc, int status) {
         }
     }
 
-    // choose next runnable process
     PCB_t *next = ready_queue_head;
-
     if (next != NULL) {
         ready_queue_head = next->next;
         next->next = NULL;
@@ -141,18 +134,31 @@ void sys_exit(PCB_t *proc, int status) {
         next = idle_pcb;
     }
 
+    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
+    int ks_npg = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
+    for (int i = 0; i < ks_npg; i++) {
+        KernelPT[ks_base_pg + i].pfn = next->kstack_pfn[i];
+        KernelPT[ks_base_pg + i].valid = 1;
+        KernelPT[ks_base_pg + i].prot = PROT_READ | PROT_WRITE;
+    }
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
+
     PCB_t *old = current_process;
     current_process = next;
 
-    TracePrintf(0, "sys_exit: switching from pid=%d to pid=%d\n",
-                old->pid,
-                next->pid);
+    TracePrintf(0, "sys_exit: switching from pid=%d to pid=%d\n", old->pid, next->pid);
+
+    if (next == idle_pcb) {
+        WriteRegister(REG_PTBR1, (unsigned int)idle_pcb->r1pt);
+        WriteRegister(REG_PTLR1, MAX_PT_LEN);
+        WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+        memcpy(uc, &idle_pcb->usr_ctx, sizeof(UserContext));
+        return;
+    }
 
     KernelContextSwitch(KCSwitchFunc, old, next);
 
-    // should never return
     TracePrintf(0, "ERROR: returned from sys_exit\n");
-
     Halt();
 }
 
@@ -192,7 +198,6 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
 
         int f = find_free();
         if (f == ERROR) {
-            // undo allocations
             for (int j = 0; j < i; j++) {
                 if (child->r1pt[j].valid) {
                     frames[child->r1pt[j].pfn] = 0;
@@ -252,16 +257,18 @@ int sys_fork(PCB_t *parent, UserContext *uc) {
     ready_queue_head   = child;
     TracePrintf(0, "sys_fork: child pid=%d\n", child->pid);
 
+    // save child pid before switch since current_process changes
+    int child_pid = child->pid;
+
     // copy parent kstack into child's frames and save child's kernel context
-    // KCCopyFunc does everything atomically and returns kc_in so we stay as parent
     KernelContextSwitch(KCCopyFunc, child, NULL);
 
-    if (current_process == child) {
-        return 0;
+    // both parent and child resume here after being scheduled
+    // current_process tells us which one we are
+    if (current_process->pid == child_pid) {
+        return 0;   // we are the child
     }
-    // if we get here we are the parent -- child is on ready queue
-  //  current_process = parent;
-    return child->pid;
+    return child_pid;   // we are the parent
 }
 
 int sys_exec(PCB_t *proc, UserContext *uc, char *filename, char **args) {
@@ -276,7 +283,7 @@ int sys_exec(PCB_t *proc, UserContext *uc, char *filename, char **args) {
     if (rc != SUCCESS) {
         TracePrintf(0, "sys_exec: LoadProgram failed for %s\n", filename);
         // process is now in bad state -- kill it
-        sys_exit(proc, ERROR);
+        sys_exit(current_process, uc, ERROR);
         return ERROR;
     }
 
@@ -681,4 +688,6 @@ int sys_brk(PCB_t *proc, void *addr) {
 int sys_getpid(PCB_t *proc) {
     return proc->pid;
 }
+
+
 
