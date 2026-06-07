@@ -173,7 +173,7 @@ void thandler(UserContext *usr_cont) {
                         (int)usr_cont->regs[2]);
                     break;
                 case YALNIX_EXIT:
-                    sys_exit(current_process, (int)usr_cont->regs[0]);
+                    sys_exit(current_process, usr_cont, (int)usr_cont->regs[0]);
                     break;
                 case YALNIX_LOCK_INIT:
                     usr_cont->regs[0] = sys_lock_init((int *)usr_cont->regs[0]);
@@ -228,7 +228,7 @@ void thandler(UserContext *usr_cont) {
                 TracePrintf(0, "TRAP_ILLEGAL: init process -- halting\n");
                 Halt();
             }
-            sys_exit(current_process, ERROR);
+            sys_exit(current_process, usr_cont, ERROR);
             memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
  
@@ -238,7 +238,7 @@ void thandler(UserContext *usr_cont) {
                 TracePrintf(0, "TRAP_MATH: init process -- halting\n");
                 Halt();
             }
-            sys_exit(current_process, ERROR);
+            sys_exit(current_process, usr_cont, ERROR);
             memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
  
@@ -250,7 +250,7 @@ void thandler(UserContext *usr_cont) {
             if (addr < VMEM_1_BASE || addr >= VMEM_1_LIMIT) {
                 TracePrintf(0, "TRAP_MEMORY: pid=%d addr=%p out of region 1, killing\n", current_process->pid, fault_addr);
                 if (current_process->pid == 1) Halt();
-                sys_exit(current_process, ERROR);
+                sys_exit(current_process, usr_cont, ERROR);
                 memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                 break;
             }
@@ -263,7 +263,7 @@ void thandler(UserContext *usr_cont) {
                 TracePrintf(0, "TRAP_MEMORY: pid=%d protection fault at %p -- killing\n",
                             current_process->pid, fault_addr);
                 if (current_process->pid == 1) Halt();
-                sys_exit(current_process, ERROR);
+                sys_exit(current_process, usr_cont, ERROR);
                 memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                 break;
             }
@@ -280,7 +280,7 @@ void thandler(UserContext *usr_cont) {
                             "(brk_vpn=%d sp_vpn=%d fault_vpn=%d) -- killing\n",
                             current_process->pid, fault_addr, brk_vpn, sp_vpn, fault_vpn);
                 if (current_process->pid == 1) Halt();
-                sys_exit(current_process, ERROR);
+                sys_exit(current_process, usr_cont, ERROR);
                 memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                 break;
             }
@@ -303,7 +303,7 @@ void thandler(UserContext *usr_cont) {
  
             if (!ok) {
                 if (current_process->pid == 1) Halt();
-                sys_exit(current_process, ERROR);
+                sys_exit(current_process, usr_cont, ERROR);
                 memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                 break;
             }
