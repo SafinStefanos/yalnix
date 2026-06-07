@@ -33,7 +33,7 @@ typedef struct Cvar {
 
 /*this might be somewhere alr tbh*/
 #ifndef PIPE_BUFFER_LEN
-#define PIPE_BUFFER_LEN 512 
+#define PIPE_BUFFER_LEN 256
 #endif
  
 typedef struct Pipe {
