@@ -8,7 +8,6 @@
 #include <struct_helpers.h>
 #include <load.h>
 
-
 unsigned char frames[MAX_PMEM_SIZE/PAGESIZE];
 pte_t KernelPT[MAX_PT_LEN];
 void *IVT[TRAP_VECTOR_SIZE];
