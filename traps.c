@@ -5,18 +5,30 @@
 #include <kern.h>
 #include <syscalls.h>
 #include "sync.h"
- 
+
 extern PCB_t* current_process;
 extern PCB_t* sleep_queue_head;
- 
- 
+extern pte_t KernelPT[];
+extern KernelContext *KCSwitchFunc();
+
+static void remap_kstack(PCB_t *pcb) {
+    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
+    int ks_npg     = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
+    for (int i = 0; i < ks_npg; i++) {
+        KernelPT[ks_base_pg + i].pfn   = pcb->kstack_pfn[i];
+        KernelPT[ks_base_pg + i].valid = 1;
+        KernelPT[ks_base_pg + i].prot  = PROT_READ | PROT_WRITE;
+    }
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
+}
+
 /* thandler: handles all hardware traps and syscalls */
 void thandler(UserContext *usr_cont) {
     switch (usr_cont->vector) {
         case TRAP_CLOCK:
             memcpy(&current_process->usr_ctx, usr_cont, sizeof(UserContext));
- 
-            // tick down sleeping processes and wake ready ones
+
+            /* tick down sleeping processes and wake ready ones */
             PCB_t *curr_sleep = sleep_queue_head;
             PCB_t *prev_sleep = NULL;
             while (curr_sleep != NULL) {
@@ -26,7 +38,7 @@ void thandler(UserContext *usr_cont) {
                     else prev_sleep->next = curr_sleep->next;
                     PCB_t *tmp = curr_sleep->next;
                     curr_sleep->next = NULL;
-                    // append woken process to back of ready queue
+                    curr_sleep->state = READY;
                     if (ready_queue_head == NULL) {
                         ready_queue_head = curr_sleep;
                     } else {
@@ -40,102 +52,95 @@ void thandler(UserContext *usr_cont) {
                     curr_sleep = curr_sleep->next;
                 }
             }
- 
-            // only switch if someone else is waiting
+
             if (ready_queue_head != NULL && current_process != idle_pcb) {
-                // re-queue current process at the back
+                /* preempt current process -- put it at the back */
                 PCB_t *tail = ready_queue_head;
                 while (tail->next != NULL) tail = tail->next;
                 current_process->next = NULL;
+                current_process->state = READY;
                 tail->next = current_process;
- 
-                // dequeue next
+
                 PCB_t *old = current_process;
                 current_process = ready_queue_head;
                 ready_queue_head = ready_queue_head->next;
                 current_process->next = NULL;
- 
+
                 KernelContextSwitch(KCSwitchFunc, old, current_process);
             } else if (ready_queue_head != NULL && current_process == idle_pcb) {
-                // idle is running but someone is ready -- switch immediately
+                /* idle is running but someone is ready -- switch immediately */
                 PCB_t *old = current_process;
                 current_process = ready_queue_head;
                 ready_queue_head = ready_queue_head->next;
                 current_process->next = NULL;
- 
+
                 KernelContextSwitch(KCSwitchFunc, old, current_process);
             }
-            // else: nothing ready, keep running current process (or idle)
- 
+            /* else: nothing ready, keep running current (or idle) */
+
+            /* always remap kstack and region 1 to whoever is current now */
+            remap_kstack(current_process);
             WriteRegister(REG_PTBR1, (unsigned int)current_process->r1pt);
             WriteRegister(REG_PTLR1, MAX_PT_LEN);
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
             memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
- 
+
         case TRAP_TTY_TRANSMIT: {
             int tty_id = usr_cont->code;
             TtyWriteReq_t *req = tty_write_req[tty_id];
             if (req == NULL) break;
- 
-            // advance sent by however much we just transmitted
+
             int just_sent = (req->len - req->sent > TERMINAL_MAX_LINE)
                             ? TERMINAL_MAX_LINE : (req->len - req->sent);
             req->sent += just_sent;
- 
+
             if (req->sent < req->len) {
-                // more chunks remain
                 int chunk = (req->len - req->sent > TERMINAL_MAX_LINE)
                             ? TERMINAL_MAX_LINE : (req->len - req->sent);
                 TtyTransmit(tty_id, req->buf + req->sent, chunk);
             } else {
-                // fully transmitted -- wake the writer
                 tty_busy[tty_id] = 0;
                 tty_write_req[tty_id] = NULL;
                 free(req->buf);
- 
+
                 PCB_t *proc = req->proc;
                 free(req);
- 
+
                 proc->state = READY;
                 proc->next = ready_queue_head;
                 ready_queue_head = proc;
             }
             break;
         }
- 
+
         case TRAP_TTY_RECEIVE: {
             int tty_id = usr_cont->code;
- 
-            // read into terminal's input buffer
-            int n = TtyReceive(tty_id,
-                            tty_read_buf[tty_id],
-                            TERMINAL_MAX_LINE);
+
+            int n = TtyReceive(tty_id, tty_read_buf[tty_id], TERMINAL_MAX_LINE);
             tty_read_len[tty_id] = n;
- 
-            // wake first waiting reader if any
+
             TtyReadReq_t *req = tty_read_queue[tty_id];
             if (req != NULL) {
                 tty_read_queue[tty_id] = req->next;
- 
+
                 int give = (req->len < n) ? req->len : n;
                 memcpy(req->buf, tty_read_buf[tty_id], give);
                 req->received = give;
- 
-                // shift buffer
+
                 int remaining = n - give;
                 if (remaining > 0)
                     memmove(tty_read_buf[tty_id],
                             tty_read_buf[tty_id] + give, remaining);
                 tty_read_len[tty_id] = remaining;
- 
+
                 req->proc->state = READY;
                 req->proc->next = ready_queue_head;
                 ready_queue_head = req->proc;
             }
             break;
         }
- 
+
         case TRAP_KERNEL:
             TracePrintf(0, "TRAP_KERNEL: code=0x%x\n", usr_cont->code);
             TracePrintf(0, "TRAP_KERNEL: current_process=%p pid=%d sibling=%p\n",
@@ -149,37 +154,44 @@ void thandler(UserContext *usr_cont) {
                     break;
                 case YALNIX_DELAY:
                     usr_cont->regs[0] = sys_delay(current_process, usr_cont, (int)usr_cont->regs[0]);
+                    memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_WAIT:
                     usr_cont->regs[0] = sys_wait(current_process, usr_cont, (int *)usr_cont->regs[0]);
+                    memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_FORK:
                     usr_cont->regs[0] = sys_fork(current_process, usr_cont);
                     memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_EXEC:
-                    usr_cont->regs[0] = sys_exec(current_process, usr_cont, (char *)usr_cont->regs[0], (char **)usr_cont->regs[1]);
+                    usr_cont->regs[0] = sys_exec(current_process, usr_cont,
+                        (char *)usr_cont->regs[0], (char **)usr_cont->regs[1]);
                     break;
                 case YALNIX_TTY_WRITE:
                     usr_cont->regs[0] = sys_tty_write(current_process, usr_cont,
                         (int)usr_cont->regs[0],
                         (void *)usr_cont->regs[1],
                         (int)usr_cont->regs[2]);
+                    memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_TTY_READ:
                     usr_cont->regs[0] = sys_tty_read(current_process, usr_cont,
                         (int)usr_cont->regs[0],
                         (void *)usr_cont->regs[1],
                         (int)usr_cont->regs[2]);
+                    memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_EXIT:
-                    sys_exit(current_process, usr_cont, (int)usr_cont->regs[0]);
+                    sys_exit(current_process, (int)usr_cont->regs[0]);
+                    memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_LOCK_INIT:
                     usr_cont->regs[0] = sys_lock_init((int *)usr_cont->regs[0]);
                     break;
                 case YALNIX_LOCK_ACQUIRE:
                     usr_cont->regs[0] = sys_acquire(current_process, usr_cont, (int)usr_cont->regs[0]);
+                    memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_LOCK_RELEASE:
                     usr_cont->regs[0] = sys_release(current_process, (int)usr_cont->regs[0]);
@@ -196,6 +208,7 @@ void thandler(UserContext *usr_cont) {
                 case YALNIX_CVAR_WAIT:
                     usr_cont->regs[0] = sys_cvar_wait(current_process, usr_cont,
                         (int)usr_cont->regs[0], (int)usr_cont->regs[1]);
+                    memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_PIPE_INIT:
                     TracePrintf(0, "PIPE_INIT: regs[0]=%p\n", (void *)usr_cont->regs[0]);
@@ -206,12 +219,14 @@ void thandler(UserContext *usr_cont) {
                         (int)usr_cont->regs[0],
                         (void *)usr_cont->regs[1],
                         (int)usr_cont->regs[2]);
+                    memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_PIPE_WRITE:
                     usr_cont->regs[0] = sys_pipe_write(current_process, usr_cont,
                         (int)usr_cont->regs[0],
                         (void *)usr_cont->regs[1],
                         (int)usr_cont->regs[2]);
+                    memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                     break;
                 case YALNIX_RECLAIM:
                     usr_cont->regs[0] = sys_reclaim((int)usr_cont->regs[0]);
@@ -221,71 +236,59 @@ void thandler(UserContext *usr_cont) {
                     break;
             }
             break;
- 
+
         case TRAP_ILLEGAL:
             TracePrintf(0, "TRAP_ILLEGAL: pid=%d pc=%p -- killing\n", current_process->pid, usr_cont->pc);
-            if (current_process->pid == 1) {
-                TracePrintf(0, "TRAP_ILLEGAL: init process -- halting\n");
-                Halt();
-            }
-            sys_exit(current_process, usr_cont, ERROR);
+            if (current_process->pid == 1) { TracePrintf(0, "TRAP_ILLEGAL: init -- halting\n"); Halt(); }
+            sys_exit(current_process, ERROR);
             memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
- 
+
         case TRAP_MATH:
             TracePrintf(0, "TRAP_MATH: pid=%d pc=%p -- killing\n", current_process->pid, usr_cont->pc);
-            if (current_process->pid == 1) {
-                TracePrintf(0, "TRAP_MATH: init process -- halting\n");
-                Halt();
-            }
-            sys_exit(current_process, usr_cont, ERROR);
+            if (current_process->pid == 1) { TracePrintf(0, "TRAP_MATH: init -- halting\n"); Halt(); }
+            sys_exit(current_process, ERROR);
             memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
             break;
- 
+
         case TRAP_MEMORY: {
             void *fault_addr = usr_cont->addr;
             unsigned int addr = (unsigned int)fault_addr;
- 
-            // Must be in region 1
+
             if (addr < VMEM_1_BASE || addr >= VMEM_1_LIMIT) {
-                TracePrintf(0, "TRAP_MEMORY: pid=%d addr=%p out of region 1, killing\n", current_process->pid, fault_addr);
+                TracePrintf(0, "TRAP_MEMORY: pid=%d addr=%p out of region 1, killing\n",
+                            current_process->pid, fault_addr);
                 if (current_process->pid == 1) Halt();
-                sys_exit(current_process, usr_cont, ERROR);
+                sys_exit(current_process, ERROR);
                 memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                 break;
             }
- 
-            // Compute which page faulted (region 1 relative)
+
             int fault_vpn = (addr - VMEM_1_BASE) >> PAGESHIFT;
- 
-            // Already mapped? Then it's a protection fault, not growable
+
             if (current_process->r1pt[fault_vpn].valid) {
                 TracePrintf(0, "TRAP_MEMORY: pid=%d protection fault at %p -- killing\n",
                             current_process->pid, fault_addr);
                 if (current_process->pid == 1) Halt();
-                sys_exit(current_process, usr_cont, ERROR);
+                sys_exit(current_process, ERROR);
                 memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                 break;
             }
- 
-            // Stack pointer page (region 1 relative)
+
             unsigned int sp = (unsigned int)usr_cont->sp;
-            int sp_vpn = (sp - VMEM_1_BASE) >> PAGESHIFT;
- 
-            // brk page (region 1 relative) -- heap top
+            int sp_vpn  = (sp - VMEM_1_BASE) >> PAGESHIFT;
             int brk_vpn = ((unsigned int)current_process->brk - VMEM_1_BASE) >> PAGESHIFT;
- 
+
             if (fault_vpn < brk_vpn || fault_vpn > sp_vpn) {
                 TracePrintf(0, "TRAP_MEMORY: pid=%d addr=%p not in stack growth region "
                             "(brk_vpn=%d sp_vpn=%d fault_vpn=%d) -- killing\n",
                             current_process->pid, fault_addr, brk_vpn, sp_vpn, fault_vpn);
                 if (current_process->pid == 1) Halt();
-                sys_exit(current_process, usr_cont, ERROR);
+                sys_exit(current_process, ERROR);
                 memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                 break;
             }
- 
-            // Grow the stack
+
             int ok = 1;
             for (int i = fault_vpn; i <= sp_vpn; i++) {
                 if (current_process->r1pt[i].valid) continue;
@@ -300,22 +303,22 @@ void thandler(UserContext *usr_cont) {
                 current_process->r1pt[i].pfn   = f;
                 current_process->r1pt[i].prot  = PROT_READ | PROT_WRITE;
             }
- 
+
             if (!ok) {
                 if (current_process->pid == 1) Halt();
-                sys_exit(current_process, usr_cont, ERROR);
+                sys_exit(current_process, ERROR);
                 memcpy(usr_cont, &current_process->usr_ctx, sizeof(UserContext));
                 break;
             }
- 
+
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
             break;
         }
- 
+
         case TRAP_DISK:
             TracePrintf(0, "TRAP_DISK: unexpected disk interrupt (not implemented)\n");
             break;
- 
+
         default:
             Halt();
             break;
