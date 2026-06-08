@@ -464,4 +464,3 @@ int sys_tty_read(PCB_t *proc, UserContext *uc, int tty_id, void *buf, int len) {
 int sys_getpid(PCB_t *proc) {
     return proc->pid;
 }
-
