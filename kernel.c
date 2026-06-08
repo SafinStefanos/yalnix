@@ -110,6 +110,20 @@ KernelContext *KCSInitFunc(KernelContext *kc_in, void *pcb_v, void *unused){
     return kc_in;
 }
 
+KernelContext *KCSSaveFunc(KernelContext *kc_in, void *curr_pcb_v, void *unused) {
+    PCB_t *curr = (PCB_t *)curr_pcb_v;
+    int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
+    int ks_npg     = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
+    for (int i = 0; i < ks_npg; i++) {
+        KernelPT[ks_base_pg + i].pfn   = curr->kstack_pfn[i];
+        KernelPT[ks_base_pg + i].valid = 1;
+        KernelPT[ks_base_pg + i].prot  = PROT_READ | PROT_WRITE;
+    }
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
+    curr->krn_ctx = *kc_in;
+    return kc_in;  /* stay on curr's stack */
+}
+
 KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_pcb_v) {
     PCB_t *curr = (PCB_t *)curr_pcb_v;
     PCB_t *next = (PCB_t *)next_pcb_v;
@@ -123,12 +137,22 @@ KernelContext *KCSwitchFunc(KernelContext *kc_in, void *curr_pcb_v, void *next_p
         return NULL;
     }
 
-    curr->krn_ctx = *kc_in;
-
     int ks_base_pg = KERNEL_STACK_BASE >> PAGESHIFT;
     int ks_npg     = KERNEL_STACK_MAXSIZE >> PAGESHIFT;
+
+    /* ensure kstack PTEs match curr before saving context */
     for (int i = 0; i < ks_npg; i++) {
-        KernelPT[ks_base_pg + i].pfn  = next->kstack_pfn[i];
+        KernelPT[ks_base_pg + i].pfn   = curr->kstack_pfn[i];
+        KernelPT[ks_base_pg + i].valid = 1;
+        KernelPT[ks_base_pg + i].prot  = PROT_READ | PROT_WRITE;
+    }
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_KSTACK);
+
+    curr->krn_ctx = *kc_in;
+
+    /* remap to next's kstack and region 1 */
+    for (int i = 0; i < ks_npg; i++) {
+        KernelPT[ks_base_pg + i].pfn   = next->kstack_pfn[i];
         KernelPT[ks_base_pg + i].valid = 1;
         KernelPT[ks_base_pg + i].prot  = PROT_READ | PROT_WRITE;
     }
@@ -281,7 +305,7 @@ extern void KernelStart(char **argv, unsigned int pmem_size, UserContext *ctx) {
 
     // set up process globals before enabling VM
     current_process  = init_pcb;
-    ready_queue_head = init_pcb;
+    ready_queue_head = NULL;
     sleep_queue_head = NULL;
 
     // enable VM -- from here on all addresses are virtual
@@ -424,5 +448,4 @@ int SetKernelBrk(void *addr){
 	
     return SUCCESS; 
 }
-
 
